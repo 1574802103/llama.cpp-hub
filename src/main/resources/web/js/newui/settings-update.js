@@ -71,7 +71,7 @@ const SettingsUpdate = {
     download() {
         const tag = $('#updDownload').dataset.tag || '';
         if (!tag || tag.indexOf('{tag}') >= 0) { this.updError('当前版本不支持自动更新'); return; }
-        let url = 'https://github.com/IIIIIllllIIIIIlllll/llama.cpp-hub/releases/download/' + tag +
+        let url = 'https://github.com/1574802103/llama.cpp-hub/releases/download/' + tag +
             '/llama.cpp-hub-' + tag + '.zip';
         if (this.proxy()) url = this.proxy() + url;
         $('#updDownload').style.display = 'none';

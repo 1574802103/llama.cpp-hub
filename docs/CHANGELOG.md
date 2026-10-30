@@ -242,3 +242,26 @@ llama-server 不提供 UI。修法：`LlamaServerManager.stripWebUiDisableFlags`
 核心概念、功能、快速开始、目录结构、端口布局（8080 / 8100 / 8081+ / 8075）、聊天台规则、
 配置表、11 条维护记录、6 条 FAQ（含 `--no-webui` 404、历史丢失、刷新慢）、安全声明、编译方式。
 所有相对链接已校验存在。
+
+---
+
+## 2026-10-30 · 版本号 0.0.1 / 更新入口切到本仓库
+
+本维护版从 0.0.1 重新编号，不再沿用上游 0.9.8.3；「设置 → 版本更新」改为只认本仓库的 Release。
+
+**版本号**
+- `BuildInfo` 增加占位符兜底：CI 打了 tag 就用 tag 替换，本地 `javac` 直接编译时回落到
+  `v0.0.1` / `0.0.1`（不再出现 `{tag}` 未替换导致「不支持自动更新」）。
+- `pom.xml` 版本 `0.0.1-SNAPSHOT` → `0.0.1`。
+- 侧栏与“当前版本”显示 `v0.0.1`。
+
+**更新入口**
+- `GitHubTagFetcherNative.API_URL`：`api.github.com/repos/IIIIIllllIIIIIlllll/llama.cpp-hub/releases/latest`
+  → `api.github.com/repos/1574802103/llama.cpp-hub/releases/latest`。
+- `web/js/settings.js`、`web/js/newui/settings-update.js` 的下载地址前缀同步改为 `1574802103`，
+  资产命名仍为 `llama.cpp-hub-<tag>.zip`（Release 里必须按这个名字传，否则下载 404）。
+- “查看 Release 页面”链接来自 API 返回的 `html_url`，自动跟着新仓库走。
+
+**发布流程**
+- `.github/workflows/build-and-release.yml` 去掉 `push: tags` 触发，只留 `workflow_dispatch`：
+  发布包在本地用 javac + 指定 llama.cpp 版本打包后手动上传，避免 CI 产出与本地不一致的 Release。

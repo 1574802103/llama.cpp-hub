@@ -4,10 +4,12 @@
 **聊天直接用 llama.cpp 自带 WebUI**，hub 只负责启停和配置——聊天界面永远跟着 llama.cpp 官方升级走。
 
 > **项目状态**：原作者（[IIIIIllllIIIIIlllll/llama.cpp-hub](https://github.com/IIIIIllllIIIIIlllll/llama.cpp-hub)）已停止维护。
-> 本仓库是接续维护的版本，基线 **0.9.8.3**，所有改动记录在 [docs/CHANGELOG.md](./docs/CHANGELOG.md)。
+> 本仓库是接续维护的版本：基线 0.9.8.3，本仓库自己的版本号从 **0.0.1** 起，
+> 所有改动记录在 [docs/CHANGELOG.md](./docs/CHANGELOG.md)。
+> 目录里的「设置 → 版本更新」检查的就是**本仓库**的 Release（`1574802103/llama.cpp-hub`），不会再跑去问原作者。
 
 > **下载**：Windows 打包版（含 JRE + llama.cpp **b11998** CUDA 13.4）见
-> [Releases → v0.9.8.3-maint](https://github.com/1574802103/llama.cpp-hub/releases/tag/v0.9.8.3-maint)。
+> [Releases → v0.0.1](https://github.com/1574802103/llama.cpp-hub/releases/tag/v0.0.1)。
 > 随包只带这一个 CUDA 版本，其它版本（CPU / ROCm / 别的构建号）请自行放进 `llamacpp/`，
 > 包内 `llamacpp/README.txt` 有说明。
 

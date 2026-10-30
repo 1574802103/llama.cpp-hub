@@ -3,10 +3,9 @@ name: Build and Release
 permissions:
   contents: write
 
+# 本维护版的发布包在本地用 javac + 指定 llama.cpp 版本打包后手动上传，
+# 所以 tag 不再自动触发构建，避免 CI 产出与本地包不一致的 Release。
 on:
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
 
 jobs:

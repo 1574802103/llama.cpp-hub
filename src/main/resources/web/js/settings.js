@@ -1316,7 +1316,7 @@
             return;
         }
         var zipFileName = 'llama.cpp-hub-' + tagName + '.zip';
-        var downloadUrl = 'https://github.com/IIIIIllllIIIIIlllll/llama.cpp-hub/releases/download/' + tagName + '/' + zipFileName;
+        var downloadUrl = 'https://github.com/1574802103/llama.cpp-hub/releases/download/' + tagName + '/' + zipFileName;
         var proxySelect = byId('updateProxySelect');
         if (proxySelect && proxySelect.value) {
             downloadUrl = proxySelect.value + downloadUrl;
