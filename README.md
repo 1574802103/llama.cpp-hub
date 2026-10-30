@@ -6,6 +6,11 @@
 > **项目状态**：原作者（[IIIIIllllIIIIIlllll/llama.cpp-hub](https://github.com/IIIIIllllIIIIIlllll/llama.cpp-hub)）已停止维护。
 > 本仓库是接续维护的版本，基线 **0.9.8.3**，所有改动记录在 [docs/CHANGELOG.md](./docs/CHANGELOG.md)。
 
+> **下载**：Windows 打包版（含 JRE + llama.cpp **b11998** CUDA 13.4）见
+> [Releases → v0.9.8.3-maint](https://github.com/1574802103/llama.cpp-hub/releases/tag/v0.9.8.3-maint)。
+> 随包只带这一个 CUDA 版本，其它版本（CPU / ROCm / 别的构建号）请自行放进 `llamacpp/`，
+> 包内 `llamacpp/README.txt` 有说明。
+
 ---
 
 ## 目录
