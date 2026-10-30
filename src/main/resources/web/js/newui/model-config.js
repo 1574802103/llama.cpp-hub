@@ -314,10 +314,11 @@ const ModelConfig = {
                 const fn = this.fieldName(p);
                 const label = I18n.t(p.name, (p.fullName || p.abbreviation || p.name));
                 const flag = (p.fullName || p.abbreviation || '').trim();
+                const tip = I18n.t(p.description, '');
                 const input = this.inputHtml(p, fn);
                 return '<div class="param-item disabled' + (this.isOmn(p) ? ' omn' : '') + '" data-fn="' + esc(fn) + '">' +
                     '<input type="checkbox" class="p-check">' +
-                    '<div class="p-label">' + esc(label) + '<span class="p-flag">' + esc(flag) + '</span></div>' +
+                    '<div class="p-label" title="' + esc(tip) + '">' + esc(label) + '<span class="p-flag">' + esc(flag) + '</span></div>' +
                     '<div class="p-input">' + input + '</div></div>';
             }).join('');
             return '<details class="param-group"' + (g.collapsed ? '' : ' open') + '><summary><span>' +

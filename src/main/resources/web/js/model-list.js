@@ -66,7 +66,19 @@ function updateModelCountBadge(loadedCount, totalCount) {
     }
 }
 
+// 「刷新模型列表」要成对提示：等列表真正渲染完再弹「刷新完成」。
+// loadModels 完成渲染时唤醒所有等待者（返回本次渲染出的模型数量）。
+const modelsLoadWaiters = [];
+function signalModelsLoaded() {
+    const count = Array.isArray(currentModelsData) ? currentModelsData.length : 0;
+    while (modelsLoadWaiters.length) {
+        const resolve = modelsLoadWaiters.shift();
+        try { resolve(count); } catch (e) { /* ignore */ }
+    }
+}
+
 function loadModels() {
+    const __done = new Promise(function (resolve) { modelsLoadWaiters.push(resolve); });
     const modelsList = document.getElementById('modelsList');
     fetch('/api/models/list')
         .then(response => response.json())
@@ -129,6 +141,7 @@ function loadModels() {
                                     const loadedCount = (loadedData.models || []).length;
                                     updateModelCountBadge(loadedCount, totalCount);
                                 }
+                                signalModelsLoaded();
                             })
                             .catch(() => {
                                 currentModelsData = modelsWithStatus;
@@ -139,6 +152,7 @@ function loadModels() {
                                     const loadedCount = (loadedData.models || []).length;
                                     updateModelCountBadge(loadedCount, totalCount);
                                 }
+                                signalModelsLoaded();
                             });
                     });
             } else {
@@ -155,7 +169,10 @@ function loadModels() {
                             <button class="btn btn-primary" onclick="loadModels()">${t('common.retry', '重试')}</button>
                         </div>
                     `;
+            signalModelsLoaded();
         });
+
+    return __done;
 }
 
 // Model icons are served as static PNGs and cached by the browser's HTTP cache.
@@ -349,7 +366,7 @@ function renderModelsList(models) {
             statusClass = status === 'running' ? 'status-running' : 'status-loaded';
         }
 
-        const modelIconPath = getModelIcon(architecture);
+        const modelIconPath = getModelIcon(model.alias || model.name || model.id || '', architecture);
         const modelIconSrc = modelIconPath || null;
         const displayName = (model.alias && model.alias.trim()) ? model.alias : model.name;
         const isFavourite = !!model.favourite;
@@ -368,24 +385,25 @@ function renderModelsList(models) {
             cloneOpButton = `<button class="btn-icon" onclick="createCloneModel(event, decodeURIComponent('${encodeURIComponent(model.id)}'), '${nodeId || 'local'}')" title="${t('page.model.action.create_clone', '创建克隆体')}"><i class="fas fa-clone"></i></button>`;
         }
 
+        const chatButton = `<button class="btn-icon" onclick="openChatHub(event, decodeURIComponent('${encodeURIComponent(model.id)}'), '${nodeId || 'local'}')" title="${t('page.model.action.chat', '开始聊天')}"><i class="fas fa-comment-dots"></i></button>`;
         let actionButtons = '';
         if (isLoading) {
-            actionButtons = `<button class="btn-icon danger" onclick="stopModel('${model.id}', '${nodeId}')" title="${t('page.model.action.cancel_loading', '取消加载')}"><i class="fas fa-stop"></i></button>${cloneOpButton}`;
+            actionButtons = `${chatButton}<button class="btn-icon danger" onclick="stopModel('${model.id}', '${nodeId}')" title="${t('page.model.action.cancel_loading', '取消加载')}"><i class="fas fa-stop"></i></button>${cloneOpButton}`;
         } else if (model.isLoaded) {
             if (status === 'running') {
-                actionButtons = `
+                actionButtons = `${chatButton}
                             <button class="btn-icon primary" onclick="loadModel(decodeURIComponent('${encodeURIComponent(model.id)}'), decodeURIComponent('${encodeURIComponent(model.name)}'), '', '${nodeId}', decodeURIComponent('${encodeURIComponent(model.sourceModelId || '')}'))" title="${t('modal.model_action.title.load', '加载模型')}"><i class="fas fa-sliders-h"></i></button>
                             <button class="btn-icon" onclick="viewModelDetails('${model.id}', '${nodeId}')" title="${t('page.model.action.details', '详情')}"><i class="fas fa-info-circle"></i></button>
                             ${cloneOpButton}
                         `;
             } else {
-                actionButtons = `
+                actionButtons = `${chatButton}
                             <button class="btn-icon primary" onclick="loadModel(decodeURIComponent('${encodeURIComponent(model.id)}'), decodeURIComponent('${encodeURIComponent(model.name)}'), '', '${nodeId}', decodeURIComponent('${encodeURIComponent(model.sourceModelId || '')}'))" title="${t('modal.model_action.title.load', '加载模型')}"><i class="fas fa-sliders-h"></i></button>
                             ${cloneOpButton}
                         `;
             }
         } else {
-            actionButtons = `
+            actionButtons = `${chatButton}
                         <button class="btn-icon primary" onclick="loadModel(decodeURIComponent('${encodeURIComponent(model.id)}'), decodeURIComponent('${encodeURIComponent(model.name)}'), '', '${nodeId}', decodeURIComponent('${encodeURIComponent(model.sourceModelId || '')}'))" title="${t('page.model.action.load', '加载')}"><i class="fas fa-play"></i></button>
                         <button class="btn-icon" onclick="viewModelDetails('${model.id}', '${nodeId}')" title="${t('page.model.action.details', '详情')}"><i class="fas fa-info-circle"></i></button>
                         ${cloneOpButton}
@@ -445,6 +463,11 @@ const speedHtml = (model.averagePromptPerSecond ? `<span class="model-meta-promp
             : `${iconWrapper}${detailsBlock}`;
         html += `
                     <div class="model-item ${model.isClone ? 'model-clone' : ''}"${borderStyle}>
+                        <input type="checkbox" class="model-batch-check"
+                            data-key="${encodeURIComponent((nodeId || 'local') + '|' + model.id)}"
+                            data-remote="${(nodeId && nodeId !== 'local') ? '1' : '0'}"
+                            title="${t('page.model.batch_version.pick', '选择该模型')}"
+                            onchange="BatchVersion.onCheckChange(this)">
                         <button class="model-fav-btn ${isFavourite ? 'active' : ''}" onclick="toggleFavouriteModel(event, decodeURIComponent('${encodeURIComponent(model.id)}'), '${nodeId || 'local'}')" title="${isFavourite ? t('page.model.fav.remove', '取消喜好') : t('page.model.fav.add', '标记喜好')}">
                             <i class="${isFavourite ? 'fas' : 'far'} fa-star"></i>
                         </button>
@@ -454,6 +477,10 @@ const speedHtml = (model.averagePromptPerSecond ? `<span class="model-meta-promp
                 `;
     });
     modelsList.innerHTML = html;
+    // 批量切版本模式下，把选择状态同步到新渲染出来的复选框
+    if (window.BatchVersion && typeof BatchVersion.afterRender === 'function') {
+        BatchVersion.afterRender();
+    }
     // Icons are rendered directly with <img>; the browser handles HTTP caching.
     const input = document.getElementById('modelSearchInput');
     if (input) filterModels(input.value);
@@ -634,18 +661,36 @@ function applyLoadedOnlyUI() {
 
 function refreshModels() {
     showToast(t('toast.info', '提示'), t('page.model.refreshing', '正在刷新模型列表'), 'info');
+    const btn = document.getElementById('refreshModelsBtn');
+    const icon = btn ? btn.querySelector('i') : null;
+    if (btn) { btn.disabled = true; }
+    if (icon) { icon.classList.add('fa-spin'); }
+    // 扫描大目录可能要几十秒，中途给个提示，别让人以为卡住了
+    const slowTimer = setTimeout(function () {
+        showToast(t('toast.info', '提示'), t('page.model.refresh_slow', '还在扫描模型目录，请稍候…'), 'info');
+    }, 10000);
+
     fetch('/api/models/refresh')
         .then(response => response.json())
         .then(data => {
-            if (data.success) {
-                loadModels();
-            } else {
-                throw new Error(data.error || t('page.model.refresh_failed', '刷新模型列表失败'));
+            if (!data || !data.success) {
+                throw new Error((data && data.error) || t('page.model.refresh_failed', '刷新模型列表失败'));
             }
+            // 列表重新拉完、渲染完才弹「刷新完成」
+            return loadModels();
+        })
+        .then(count => {
+            const suffix = typeof count === 'number' ? '，共 ' + count + ' 个模型' : '';
+            showToast(t('toast.success', '完成'), t('page.model.refreshed', '刷新完成') + suffix, 'success');
         })
         .catch(error => {
-            showToast(t('toast.error', '错误'), error.message || t('page.model.network_retry', '网络错误，请稍后重试'), 'error');
-            loadModels();
+            showToast(t('toast.error', '错误'), (error && error.message) || t('page.model.network_retry', '网络错误，请稍后重试'), 'error');
+            return loadModels();
+        })
+        .finally(() => {
+            clearTimeout(slowTimer);
+            if (btn) { btn.disabled = false; }
+            if (icon) { icon.classList.remove('fa-spin'); }
         });
 }
 

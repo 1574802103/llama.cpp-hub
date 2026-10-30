@@ -30,7 +30,6 @@
         <button data-page="settings"><i class="fas fa-gear"></i><span>设置</span></button>
     </nav>
     <div class="sb-foot">
-        <a href="chat/index.html" class="sb-chat"><i class="fas fa-comments"></i><span>开始聊天</span></a>
         <a href="index.html" class="sb-legacy" title="旧版完整页面"><i class="fas fa-clock-rotate-left"></i><span>旧版页面</span></a>
     </div>
 </aside>
@@ -45,7 +44,6 @@
         <div class="title" id="headerTitle">模型</div>
         <button class="icon-btn" id="themeHdrBtn" title="切换主题"><i class="fas fa-circle-half-stroke"></i></button>
         <button class="icon-btn" id="refreshBtn" title="刷新"><i class="fas fa-rotate"></i></button>
-        <button class="icon-btn accent" id="chatBtn" title="聊天"><i class="fas fa-comments"></i></button>
     </header>
 
     <div class="pages">
@@ -492,7 +490,9 @@
             <div class="card span2" id="set-llamacpp-dl">
                 <h3><i class="fas fa-file-zipper"></i> llama.cpp 下载</h3>
                 <div class="kv"><span class="k">Release 版本</span>
-                    <span class="v"><button class="btn mini" id="lcRelLoad"><i class="fas fa-rotate"></i> 获取最新版本</button></span></div>
+                    <span class="v"><button class="btn mini" id="lcRelLoad"><i class="fas fa-rotate"></i> 获取版本列表</button></span></div>
+                <div class="kv"><span class="k">选择版本</span>
+                    <span class="v"><select id="lcRelSel" style="min-width:220px"></select></span></div>
                 <div class="muted" id="lcRelInfo" style="font-size:12.5px;margin-bottom:8px"></div>
                 <div id="lcAssets" class="set-list" style="margin-bottom:0"></div>
             </div>

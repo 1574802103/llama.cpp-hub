@@ -145,7 +145,7 @@ const Models = {
 
     card(m) {
         const key = esc(m.id) + '|' + esc(m.nodeId || 'local');
-        const icon = (typeof getModelIcon === 'function') ? getModelIcon(m.architecture || '') : null;
+        const icon = (typeof getModelIcon === 'function') ? getModelIcon(m.alias || m.name || m.id || '', m.architecture || '') : null;
         const badges = (m.supportsVision ? '<span>视觉</span>' : '') + (m.supportsAudio ? '<span>音频</span>' : '') + (m.hasMtp ? '<span>MTP</span>' : '') + (m.isClone ? '<span>克隆</span>' : '');
         const status = this.busyIds.has(m.id)
             ? '<span class="status-chip loading"><i class="fas fa-spinner fa-spin"></i>处理中</span>'

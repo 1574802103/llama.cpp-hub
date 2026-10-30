@@ -120,7 +120,6 @@ const App = {
         $('#themeHdrBtn').addEventListener('click', () => Theme.cycle());
         $('#langToggle').addEventListener('click', () => I18n.toggle());
         $('#langToggle').textContent = I18n.lang === 'zh-CN' ? '中文' : 'English';
-        $('#chatBtn').addEventListener('click', () => location.href = 'chat/index.html');
         $('#refreshBtn').addEventListener('click', () => {
             if (this.currentPage === 'models') Models.load(true);
             else if (this.currentPage === 'hf') HfSearch.refresh();

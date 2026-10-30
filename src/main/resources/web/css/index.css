@@ -455,6 +455,109 @@
             padding: 1px 8px;
         }
 
+        /* ---------- 批量切换 llama.cpp 版本 ---------- */
+        .batch-version-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .batch-version-menu {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            z-index: 80;
+            min-width: 380px;
+            max-width: 560px;
+            max-height: 340px;
+            overflow-y: auto;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-md);
+            padding: 6px;
+        }
+
+        .batch-version-menu .bv-title {
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding: 6px 8px;
+            line-height: 1.5;
+        }
+
+        .batch-version-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .batch-version-item:hover {
+            background: var(--hover-bg);
+        }
+
+        .batch-version-item .bv-name {
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .batch-version-item .bv-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .batch-select-bar {
+            display: none;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            padding: 10px 14px;
+            margin-bottom: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            background: var(--card-bg);
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        body.batch-select-mode .batch-select-bar {
+            display: flex;
+        }
+
+        body.batch-select-mode .model-fav-btn {
+            display: none;
+        }
+
+        .model-batch-check {
+            display: none;
+            width: 16px;
+            height: 16px;
+            margin-right: 6px;
+            flex: 0 0 auto;
+            cursor: pointer;
+        }
+
+        body.batch-select-mode .model-batch-check {
+            display: inline-block;
+        }
+
+        .batch-select-count {
+            font-weight: 600;
+        }
+
+        .batch-select-hint {
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
         .model-item {
             display: flex;
             align-items: center;
@@ -759,6 +862,17 @@
             top: 0.75rem;
             right: 0.75rem;
             margin-right: 0;
+        }
+        #modelsList.grid-view .model-batch-check {
+            position: absolute;
+            top: 0.95rem;
+            left: 1rem;
+            margin: 0;
+            z-index: 2;
+        }
+        /* 网格视图里给勾选框留出一条空白，避免压住模型图标 */
+        body.batch-select-mode #modelsList.grid-view .model-item {
+            padding-top: 2.5rem;
         }
         #modelsList.grid-view .model-card-top {
             display: flex;

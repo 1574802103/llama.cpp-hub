@@ -2422,10 +2422,6 @@
                 <i class="fas fa-cubes"></i>
                 <span data-i18n="nav.model_list">nav.model_list</span>
             </a>
-            <a href="chat/index.html" class="nav-item" id="nav-chat-completion">
-                <i class="fas fa-comments"></i>
-                <span data-i18n="nav.chat">nav.chat</span>
-            </a>
             <a href="#" class="nav-item" id="nav-benchmark-v3" onclick="showBenchmarkV3(); return false;">
                 <i class="fas fa-gauge-high"></i>
                 <span data-i18n="nav.benchmark_v3">nav.benchmark_v3</span>
@@ -2571,13 +2567,30 @@
         <div class="top-bar">
             <h1 class="page-title"><span data-i18n="page.model.title">page.model.title</span> <span id="modelCountBadge" class="model-count-badge"></span></h1>
             <div class="top-actions">
+                <div class="batch-version-wrap" id="batchVersionWrap">
+                    <button class="btn btn-secondary" id="batchVersionBtn" onclick="BatchVersion.openMenu(event)">
+                        <i class="fas fa-layer-group"></i>
+                        <span data-i18n="page.model.batch_version.button">批量切换版本</span>
+                    </button>
+                    <button class="btn btn-primary" id="batchVersionConfirm" style="display:none"
+                        onclick="BatchVersion.confirm()">
+                        <i class="fas fa-check"></i>
+                        <span data-i18n="page.model.batch_version.confirm">确定</span>
+                    </button>
+                    <button class="btn btn-secondary" id="batchVersionCancel" style="display:none"
+                        onclick="BatchVersion.cancel()">
+                        <i class="fas fa-xmark"></i>
+                        <span data-i18n="page.model.batch_version.cancel">取消</span>
+                    </button>
+                    <div class="batch-version-menu" id="batchVersionMenu" style="display:none;"></div>
+                </div>
                 <div class="search-box" style="flex-shrink:0; width: 220px;">
                     <i class="fas fa-search search-icon"></i>
                     <input type="text" id="modelSearchInput" class="search-input"
                         placeholder="page.model.search_placeholder" data-i18n="page.model.search_placeholder"
                         data-i18n-attr="placeholder">
                 </div>
-                <button class="btn btn-secondary" onclick="refreshModels()" title="common.refresh"
+                <button class="btn btn-secondary" id="refreshModelsBtn" onclick="refreshModels()" title="common.refresh"
                     data-i18n="common.refresh" data-i18n-attr="title" style="flex-shrink:0;">
                     <i class="fas fa-sync-alt"></i>
                 </button>
@@ -2621,6 +2634,21 @@
         </div>
         <div class="content-scrollable">
             <div class="model-list-container">
+                <div class="batch-select-bar" id="batchSelectBar">
+                    <label class="batch-select-all" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+                        <input type="checkbox" id="batchSelectAll" checked
+                            onchange="BatchVersion.toggleAll(this.checked)">
+                        <span data-i18n="page.model.batch_version.select_all">全选</span>
+                    </label>
+                    <span class="batch-select-count" id="batchSelectCount">已选 0 / 0</span>
+                    <span class="batch-select-target">
+                        <span data-i18n="page.model.batch_version.target">目标版本</span>：
+                        <strong id="batchTargetVersion">-</strong>
+                    </span>
+                    <span class="batch-select-hint" data-i18n="page.model.batch_version.hint">
+                        运行中的模型需要重启后生效；未配置启动参数的模型会被跳过
+                    </span>
+                </div>
                 <div id="modelsList">
                     <div class="loading-spinner">
                         <div class="spinner"></div>
@@ -2728,6 +2756,9 @@
                     <button class="settings-tab" data-tab="download">
                         <i class="fas fa-download"></i> <span
                             data-i18n="page.settings.tab.download">page.settings.tab.download</span>
+                    </button>
+                    <button class="settings-tab" data-tab="chat">
+                        <i class="fas fa-comments"></i> <span data-i18n="page.settings.tab.chat">聊天台</span>
                     </button>
                     <button class="settings-tab" data-tab="nodes">
                         <i class="fas fa-network-wired"></i> <span data-i18n="page.settings.tab.nodes">节点</span>
@@ -3369,6 +3400,65 @@ llama.cpp-hub</textarea>
                         </div>
                     </div>
 
+                    <!-- Tab: 聊天台 -->
+                    <div class="settings-tab-panel" data-tab-panel="chat">
+                        <div class="settings-panel">
+                            <div class="settings-panel-body">
+                                <div class="form-group" style="margin: 0;">
+                                    <label class="form-label">聊天台（llama.cpp 自带 WebUI）</label>
+                                    <small class="form-text">
+                                        所有模型共用同一个聊天端口（同一个 origin），所以换模型时历史是同一份；
+                                        聊天记录存在项目内 data/chat/，换 llama.cpp 版本、换设备都不丢。
+                                    </small>
+                                </div>
+                                <div class="settings-field-row">
+                                    <div class="settings-field">
+                                        <label class="form-label">端口</label>
+                                        <input class="form-control" id="chatPortInput" type="number" min="1024" max="65535" placeholder="8100">
+                                    </div>
+                                    <div class="settings-field">
+                                        <label class="form-label">按需加载超时（秒）</label>
+                                        <input class="form-control" id="chatAutoLoadInput" type="number" min="5" max="1800" placeholder="180">
+                                    </div>
+                                </div>
+                                <div class="settings-field-row">
+                                    <div class="settings-field">
+                                        <label class="form-label">内置工具（--tools）</label>
+                                        <input class="form-control" id="chatToolsInput" placeholder="留空关闭；all 全开；或 read_file,write_file,exec_shell_command">
+                                        <small class="form-text">让模型能读写项目里的文件、执行命令；只在可信环境打开。</small>
+                                    </div>
+                                </div>
+                                <div class="settings-toggle-list" style="margin-top: 4px;">
+                                    <label class="settings-toggle-row">
+                                        <span>
+                                            <strong>允许 WebUI 里的 MCP 服务器</strong>
+                                            <small style="display:block;margin-top:3px;">对应 --ui-mcp-proxy。WebUI 的 MCP 面板只能加远程 URL 服务器，需要它才能跨域。</small>
+                                        </span>
+                                        <input type="checkbox" id="chatMcpProxyInput">
+                                    </label>
+                                </div>
+                                <div class="settings-field-row">
+                                    <div class="settings-field">
+                                        <label class="form-label">stdio MCP 服务器（--mcp-servers-json）</label>
+                                        <textarea class="form-control" id="chatMcpJsonInput" rows="4"
+                                            placeholder='[{"name":"fs","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","E:/"]]}'></textarea>
+                                        <small class="form-text">原样传给每个实例；留空表示不启用。远程 URL 服务器请直接在聊天页的 MCP 面板里加，会跟着项目一起保存。</small>
+                                    </div>
+                                </div>
+                                <div class="settings-field-row">
+                                    <div class="settings-field">
+                                        <label class="form-label">历史目录</label>
+                                        <input class="form-control" id="chatHistoryDirInput" readonly>
+                                    </div>
+                                </div>
+                                <div class="settings-actions-row">
+                                    <button class="btn btn-primary" id="saveChatHubBtn">保存</button>
+                                    <button class="btn btn-secondary" onclick="openChatHub(event)">打开聊天台</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Tab: 节点 -->
                     <div class="settings-tab-panel" data-tab-panel="nodes">
                         <div class="settings-panel">
@@ -3567,6 +3657,14 @@ llama.cpp-hub</textarea>
                                     </div>
 
                                     <div class="update-sub-panel" data-sub-panel="llamacpp-download">
+                                        <div class="llamacpp-proxy-row" style="margin-top:0;margin-bottom:0.75rem;">
+                                            <span class="llamacpp-proxy-label">
+                                                <i class="fas fa-code-branch"></i>
+                                                <span data-i18n="page.settings.llamacpp.version_list">版本列表</span>
+                                            </span>
+                                            <select id="llamacppVersionSelect" class="update-proxy-select" style="min-width:260px;"
+                                                onchange="SettingsPage.selectLlamaCppVersion(this.value)"></select>
+                                        </div>
                                         <div class="llamacpp-header-row">
                                             <div class="llamacpp-version-info">
                                                 <span class="llamacpp-version-label"
@@ -4285,7 +4383,7 @@ llama.cpp-hub</textarea>
                                     data-i18n="modal.model_action.auto_unload.desc">modal.model_action.auto_unload.desc</small>
                                 <div id="autoUnloadTimeoutRow" style="display:none;margin-top:6px;align-items:center;gap:8px;">
                                     <input type="number" class="form-control" id="autoUnloadTimeoutInput"
-                                        min="1" step="1" value="30"
+                                        min="1" step="1" value="5"
                                         style="width:100px;padding:4px 8px;font-size:13px;"
                                         data-i18n-attr-placeholder="modal.model_action.auto_unload.timeout_placeholder"
                                         placeholder="分钟">
@@ -4810,7 +4908,6 @@ llama.cpp-hub</textarea>
             initModelSearch();
             loadParamConfig();
             loadBuildInfo();
-            updateChatCompletionLinkForDevice();
             applyModelView();
             applyRunningFirstUI();
             applyLoadedOnlyUI();
@@ -5464,14 +5561,6 @@ llama.cpp-hub</textarea>
                 return window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
             }
             return false;
-        }
-
-        function updateChatCompletionLinkForDevice() {
-            const link = document.getElementById('nav-chat-completion');
-            if (!link) return;
-            if (isMobileBrowser()) {
-                link.href = 'chat/index.html';
-            }
         }
 
         // --- 动态参数配置 ---
@@ -6774,7 +6863,9 @@ llama.cpp-hub</textarea>
     <script src="js/settings.js"></script>
     <script src="js/model-icon.js"></script>
     <script src="js/model-detail.js"></script>
+    <script src="js/chat-hub.js"></script>
     <script src="js/model-list.js"></script>
+    <script src="js/batch-version.js"></script>
     <script src="js/model-action-modal.js"></script>
     <script src="js/benchmark-v3.js"></script>
     <script src="js/usage-report.js"></script>

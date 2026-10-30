@@ -73,9 +73,8 @@ public class HttpContentLimitHandler extends ChannelInboundHandlerAdapter {
 
     /**
      * 主服务限额表：音频转录 / 会话全量同步 / 背景图上传为合法大 body 端点。
-     * 多模态聊天（/api/chat/stream-chat）不设上限：上游 EasyChatStreamingHandler
-     * 已把 body 全部落盘到临时文件，到达本守卫的只是空 body 的转发请求，
-     * 不存在聚合大 body 占内存的路径。
+     * 聊天已改为 llama.cpp 自带 WebUI（直连实例，不经过本服务），
+     * 不再有 /api/chat/stream-chat 这种需要落盘大 body 的路径。
      */
     public static HttpContentLimitHandler forMainServer() {
         Map<String, Integer> limits = new LinkedHashMap<>();

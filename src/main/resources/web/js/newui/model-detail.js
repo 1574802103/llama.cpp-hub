@@ -42,7 +42,7 @@ const ModelDetail = {
     loadOverview() {
         const m = this.model;
         const q = '?modelId=' + encodeURIComponent(m.id) + this.nodeQ(m);
-        const icon = (typeof getModelIcon === 'function') ? getModelIcon(m.architecture || '') : null;
+        const icon = (typeof getModelIcon === 'function') ? getModelIcon(m.alias || m.name || m.id || '', m.architecture || '') : null;
         const badges = (m.supportsVision ? '<span>视觉</span>' : '') + (m.supportsAudio ? '<span>音频</span>' : '') + (m.hasMtp ? '<span>MTP</span>' : '') + (m.isClone ? '<span>克隆</span>' : '');
         const statusChip = m.isLoaded
             ? '<span class="status-chip loaded"><i class="fas fa-circle" style="font-size:7px"></i>运行中' + (m.port ? ' · ' + m.port : '') + '</span>'

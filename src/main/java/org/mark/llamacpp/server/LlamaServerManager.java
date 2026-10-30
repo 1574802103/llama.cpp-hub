@@ -40,6 +40,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -177,6 +178,13 @@ public class LlamaServerManager {
 	 * 自动卸载调度器，用于定期检查并卸载空闲模型
 	 */
 	private final ScheduledExecutorService autoUnloadScheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("llama-auto-unload-", 0).factory());
+
+	/**
+	 * 模型加载就绪探测调度器（轮询实例 /health），与自动卸载任务隔离，
+	 * 避免加载等待期间被自动卸载检查占住线程。
+	 */
+	private final ScheduledExecutorService loadHealthScheduler = Executors.newScheduledThreadPool(2,
+			Thread.ofVirtual().name("llama-load-health-", 0).factory());
 	
 	/**
 	 *
@@ -1020,10 +1028,10 @@ public class LlamaServerManager {
 			long now = System.currentTimeMillis();
 			for (Map.Entry<String, LlamaCppProcess> entry : loaded.entrySet()) {
 				String modelId = entry.getKey();
-				String mode = allPolicies.get(modelId);
+				String mode = allPolicies.getOrDefault(modelId, ConfigManager.DEFAULT_AUTO_UNLOAD_POLICY);
 				if (!"allow".equalsIgnoreCase(mode)) continue;
 
-			Long timeoutMs = allTimeouts.get(modelId);
+				Long timeoutMs = allTimeouts.getOrDefault(modelId, ConfigManager.DEFAULT_AUTO_UNLOAD_TIMEOUT_MS);
 			if (timeoutMs == null || timeoutMs <= 0) continue;
 
 			Long lastUsed = modelLastUsedTime.get(modelId);
@@ -2047,6 +2055,10 @@ public class LlamaServerManager {
 	 * @return
 	 */
 	public boolean loadModelAsyncFromCmd(String modelId, String llamaBinPath, List<String> device, Integer mg, boolean enbaleVision, String cmd, String extraParams, String envVars, String chatTemplateFilePath, String sourceModelId, String mode) {
+		// 聊天台就是 llama.cpp 自带 WebUI：老配置里存的 --no-webui/--no-ui 会让实例不提供界面（404 File Not Found），
+		// 起飞前统一剥掉。--no-ui-mcp-proxy 之类的长参数不受影响（要求后面是空格或结尾）。
+		cmd = stripWebUiDisableFlags(cmd);
+		extraParams = stripWebUiDisableFlags(extraParams);
 		Map<String, Object> launchConfig = new HashMap<>();
 		launchConfig.put("llamaBinPathSelect", llamaBinPath);
 		launchConfig.put("device", device);
@@ -2174,7 +2186,7 @@ public class LlamaServerManager {
 
 			process.setOutputHandler(line -> {
 				LlamaServer.sendConsoleLineEvent(modelId, line);
-				if (line.contains("llama_server: model loaded") || line.contains("update_slots: all slots are idle")) {
+				if (isModelReadyLine(line)) {
 					if (latchResolved.compareAndSet(false, true)) {
 						loadSuccess.set(true);
 						latch.countDown();
@@ -2226,7 +2238,23 @@ public class LlamaServerManager {
 				LlamaServer.sendModelLoadEvent(modelId, sourceModelId, false, "启动模型进程失败", null);
 				return;
 			}
-			
+
+			// 日志兜底：不是所有版本都能稳定打出可识别的 "model loaded" 行，
+			// 再从实例的 /health 轮询确认就绪（llama-server 就绪后 /health 返回 200 + {"status":"ok"}）。
+			final ScheduledFuture<?> healthProbe = this.loadHealthScheduler.scheduleWithFixedDelay(() -> {
+				if (latchResolved.get()) return;
+				try {
+					HttpResult health = this.callLocalModelEndpoint(actualPort, "GET", "/health", null, 1500, 3000);
+					if (isHealthyResponse(health) && latchResolved.compareAndSet(false, true)) {
+						logger.info("通过 /health 确认模型已就绪: modelId={}, port={}", modelId, actualPort);
+						loadSuccess.set(true);
+						latch.countDown();
+					}
+				} catch (Exception ignore) {
+					// 进程还在加载/尚未监听端口，属于正常情况，下一轮再试
+				}
+			}, 1500, 800, TimeUnit.MILLISECONDS);
+
 			synchronized (this.processLock) {
 				this.loadingProcesses.put(modelId, process);
 			}
@@ -2326,6 +2354,8 @@ if (loadSuccess.get()) {
 					return;
 				}
 				LlamaServer.sendModelLoadEvent(modelId, sourceModelId, false, "模型加载被中断", null);
+			} finally {
+				healthProbe.cancel(false);
 			}
 		} finally {
 			synchronized (this.processLock) {
@@ -2344,6 +2374,38 @@ if (loadSuccess.get()) {
 		synchronized (this.processLock) {
 			return this.canceledLoadingModels.contains(modelId);
 		}
+	}
+
+	/**
+	 * 判断一行日志是否表示模型已经加载完成。
+	 *
+	 * <p>上游从 b11867 起把 server 的工作线程名从 {@code llama_server} 改成了
+	 * {@code server_run_i}（以及 {@code server_on_li}），于是同一句日志从
+	 * {@code srv  llama_server: model loaded} 变成 {@code srv  server_run_i: model loaded}。
+	 * 这里不能绑定线程名，只看正文；同时兼容旧版的 {@code update_slots: all slots are idle}。</p>
+	 */
+	private static boolean isModelReadyLine(String line) {
+		if (line == null || line.isEmpty()) return false;
+		String s = stripAnsi(line);
+		if (s.contains("model loaded")) return true;
+		return s.contains("update_slots: all slots are idle");
+	}
+
+	/**
+	 * 去掉日志里的 ANSI 颜色控制符，避免因为转义序列导致关键字匹配失败。
+	 */
+	private static String stripAnsi(String s) {
+		return s.replaceAll("\u001B\\[[0-9;?]*[ -/]*[@-~]", "");
+	}
+
+	/**
+	 * /health 是否表示就绪：200 且（响应体为空或带 ok）。
+	 */
+	private static boolean isHealthyResponse(HttpResult r) {
+		if (r == null || r.statusCode != 200) return false;
+		String body = r.body == null ? "" : r.body.trim();
+		if (body.isEmpty()) return true;
+		return body.contains("\"ok\"") || body.contains("ok");
 	}
 
 	private static boolean isModelErrorLine(String lower) {
@@ -2521,6 +2583,7 @@ if (loadSuccess.get()) {
 		if (!cmdHasFlag(allArgs, "--metrics")) {
 			sb.append(" --metrics");
 		}
+		this.appendChatHubFlags(sb);
 		// 一些分支不兼容这玩意，先注释掉吧，后续改为可选参数。
 		//if (!cmdHasFlag(allArgs, "--slot-save-path")) {
 			//sb.append(" --slot-save-path ");
@@ -2633,12 +2696,56 @@ if (loadSuccess.get()) {
 		if (!hasFlagToken(userArgs, "--metrics")) {
 			sb.append(" --metrics");
 		}
+		this.appendChatHubFlags(sb);
 
 		return sb.toString().trim();
 	}
 
 	private static boolean isValidEnvVarKey(String key) {
 		return key != null && !key.isEmpty() && key.matches("[A-Za-z_][A-Za-z0-9_]*");
+	}
+
+	/**
+	 * 追加聊天台需要的启动参数（来自 config/chathub.json，属于 hub 侧设置，换 llama.cpp 版本不影响）。
+	 *
+	 * <p>--tools：llama.cpp 内置文件/命令工具；--ui-mcp-proxy：WebUI 里配置的远程 MCP 服务器要它才能跨域；
+	 * --mcp-servers-json：stdio MCP 服务器声明，原样透传。</p>
+	 */
+	private void appendChatHubFlags(StringBuilder sb) {
+		try {
+			org.mark.llamacpp.server.chathub.ChatHubSettings settings =
+					org.mark.llamacpp.server.chathub.ChatHubSettings.get();
+			String existing = sb.toString();
+			String tools = settings.tools == null ? "" : settings.tools.trim();
+			if (!tools.isEmpty() && !cmdHasFlag(existing, "--tools")) {
+				sb.append(" --tools ").append(ParamTool.quoteIfNeeded(tools));
+			}
+			if (settings.uiMcpProxy && !cmdHasFlag(existing, "--ui-mcp-proxy")
+					&& !cmdHasFlag(existing, "--no-ui-mcp-proxy")) {
+				sb.append(" --ui-mcp-proxy");
+			}
+			String mcp = settings.mcpServersJson == null ? "" : settings.mcpServersJson.trim();
+			if (!mcp.isEmpty() && !cmdHasFlag(existing, "--mcp-servers-json")) {
+				sb.append(" --mcp-servers-json ").append(ParamTool.quoteIfNeeded(mcp));
+			}
+		} catch (Exception e) {
+			logger.warn("追加聊天台启动参数失败: {}", e.getMessage());
+		}
+	}
+
+	/**
+	 * 去掉禁用 WebUI 的开关。聊天台完全依赖自带 WebUI，这两个开关留着只会让聊天页 404。
+	 */
+	private static String stripWebUiDisableFlags(String value) {
+		if (value == null || value.isBlank()) {
+			return value;
+		}
+		String padded = " " + value.trim() + " ";
+		if (!padded.contains(" --no-webui ") && !padded.contains(" --no-ui ")) {
+			return value;
+		}
+		String cleaned = padded.replace(" --no-webui ", " ").replace(" --no-ui ", " ");
+		return cleaned.trim();
 	}
 
 	private static boolean hasFlagToken(List<String> tokens, String flag) {

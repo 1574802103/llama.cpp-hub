@@ -119,6 +119,44 @@
 |------|------|------|--------|
 | POST | `/api/models/load` | 加载模型 | `{modelId, cmd, extraParams, enableVision, llamaBinPathSelect, device, mg, nodeId}` |
 | POST | `/api/models/stop` | 停止模型 | `{modelId, nodeId}` |
+| POST | `/api/models/launch/batch-bin` | 批量把多个模型的启动配置切到同一个 llama.cpp 版本 | `{llamaBinPath, modelIds:[]}` |
+
+#### `POST /api/models/launch/batch-bin`
+
+模型列表页「批量切换版本」用的接口：对每个 `modelId` 把它**所有**启动配置里的
+`llamaBinPathSelect` 改成 `llamaBinPath`，其它字段（`runCommand`、`device`、`mg`、autoLoad 策略等）原样保留；
+一次读盘一次写盘，不会出现逐个保存互相覆盖。
+
+- 校验：目录必须存在且含 `llama-server.exe`（Linux 为 `llama-server`）。
+- 正在运行的模型也会改配置，但要重启该模型才用上新版本，通过响应里的 `running` 告知。
+- 没配过启动参数的模型不写入，通过 `skipped[{modelId, reason}]` 返回。
+
+响应示例：
+
+```json
+{"success": true, "data": {
+  "llamaBinPath": "E:\llama.cpp-hub\llamacpp\llama-b11981-bin-win-cuda-13.4-x64",
+  "versionName": "llama-b11981-bin-win-cuda-13.4-x64",
+  "updated": ["GLM-4.7-Flash-Q8_0"],
+  "updatedCount": 1,
+  "skipped": [{"modelId": "PaddleOCR-VL-1.6", "reason": "未配置启动参数"}],
+  "running": []
+}}
+```
+
+### 聊天台
+
+| 方法 | 路径 | 说明 | 参数 |
+|------|------|------|------|
+| POST | `/api/models/chat` | 打开聊天台（自动加载模型） | `{modelId}`，返回 `{url}` |
+| GET | `/api/chat/proxy/status` | 聊天台状态 | — |
+| GET | `/api/chat/proxy/config` | 读取聊天台设置 | — |
+| POST | `/api/chat/proxy/config` | 保存聊天台设置 | `{port, autoLoadTimeoutMs, tools, uiMcpProxy, mcpServersJson}` |
+| GET | `/api/chat/proxy/models` | 可聊天的模型列表 | — |
+
+聊天台自己监听一个固定端口（默认 8100，`config/chathub.json`）。该端口上的 `/__hubchat/*` 是注入脚本用的内部接口：
+`GET/PUT /__hubchat/snapshot`（历史快照）、`GET /__hubchat/status`、`GET /__hubchat/models`、
+`GET /__hubchat/conversations?m=<模型>`（按模型筛会话）、`POST /__hubchat/touch`、`GET /__hubchat.js`。
 
 ### 基准测试
 
@@ -223,7 +261,8 @@
 | POST | `/api/llamacpp/add` | 添加目录（验证包含 llama-server） | `{path, name, description}` |
 | POST | `/api/llamacpp/remove` | 移除目录 | `{path}` |
 | POST | `/api/llamacpp/test` | 测试目录（运行 `llama-cli --version` + `--list-devices`） | `{path}` |
-| GET | `/api/llamacpp/release/latest` | 获取最新 GitHub Release（过滤相关后端资产） | Query: `proxy` |
+| GET | `/api/llamacpp/releases` | 获取最近 N 个 llama.cpp 构建版本（只取 tag 形如 `b11979` 的构建版本，自动跳过 `v0.x.y` 空壳 release） | Query: `proxy`、`limit`（默认 10，最大 30） |
+| GET | `/api/llamacpp/release/latest` | 获取最新一个构建版本（等价于 `/api/llamacpp/releases?limit=1` 的第一项），保留以兼容旧前端 | Query: `proxy` |
 
 ---
 

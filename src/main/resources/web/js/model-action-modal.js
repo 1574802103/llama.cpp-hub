@@ -1099,7 +1099,8 @@ function loadAutoLoadPolicy(modelId, modal, nodeId) {
         .then(res => {
             const data = res && res.data ? res.data : null;
             const policies = data && data.policies ? data.policies : {};
-            const policy = policies[mid] || 'deny';
+            // 未配置的新模型后端会回填默认值 allow；这里同样以 allow 兜底
+            const policy = policies[mid] || 'allow';
             const toggle = findById(modal, 'autoLoadToggle');
             if (toggle) {
                 toggle.checked = policy === 'allow';
@@ -1108,7 +1109,7 @@ function loadAutoLoadPolicy(modelId, modal, nodeId) {
         .catch(() => {
             const toggle = findById(modal, 'autoLoadToggle');
             if (toggle) {
-                toggle.checked = false;
+                toggle.checked = true;
             }
         });
 }
@@ -1204,7 +1205,8 @@ function loadAutoUnloadPolicy(modelId, modal, nodeId) {
         .then(res => {
             const data = res && res.data ? res.data : null;
             const unloadPolicies = data && data.autoUnload ? data.autoUnload : {};
-            const unloadPolicy = unloadPolicies[mid] || 'deny';
+            // 未配置的新模型后端会回填默认值 allow；这里同样以 allow 兜底
+            const unloadPolicy = unloadPolicies[mid] || 'allow';
             const toggle = findById(modal, 'autoUnloadToggle');
             const timeoutRow = findById(modal, 'autoUnloadTimeoutRow');
             const timeoutInput = findById(modal, 'autoUnloadTimeoutInput');
@@ -1214,24 +1216,25 @@ function loadAutoUnloadPolicy(modelId, modal, nodeId) {
             if (timeoutRow) {
                 timeoutRow.style.display = (toggle && toggle.checked) ? 'flex' : 'none';
             }
-            if (timeoutInput && data && data.models && data.models[mid]) {
-                const modelInfo = data.models[mid];
-                if (modelInfo.autoUnloadTimeoutMs) {
-                    const minutes = Math.round(modelInfo.autoUnloadTimeoutMs / 60000);
-                    if (minutes > 0) {
-                        timeoutInput.value = minutes;
-                    }
+            if (timeoutInput) {
+                const modelInfo = (data && data.models) ? data.models[mid] : null;
+                // 默认 5 分钟：后端未返回时也保持和「新模型默认值」一致
+                let minutes = 5;
+                if (modelInfo && modelInfo.autoUnloadTimeoutMs) {
+                    const parsed = Math.round(modelInfo.autoUnloadTimeoutMs / 60000);
+                    if (parsed > 0) minutes = parsed;
                 }
+                timeoutInput.value = minutes;
             }
         })
         .catch(() => {
             const toggle = findById(modal, 'autoUnloadToggle');
             const timeoutRow = findById(modal, 'autoUnloadTimeoutRow');
             if (toggle) {
-                toggle.checked = false;
+                toggle.checked = true;
             }
             if (timeoutRow) {
-                timeoutRow.style.display = 'none';
+                timeoutRow.style.display = 'flex';
             }
         });
 }

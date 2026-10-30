@@ -4,7 +4,8 @@
 const SettingsUpdate = {
     release: null,        // 应用更新 check 到的 release
     hasUpdate: false,
-    lcData: null,         // llama.cpp release 数据
+    lcData: null,         // llama.cpp release 数据（当前选中的版本）
+    lcReleases: [],       // 最近 10 个构建版本
     lcInstalled: [],      // localBackends
     lcCudarts: [],        // localCudarts
     lcDownloading: {},    // assetName -> taskId
@@ -187,23 +188,40 @@ const SettingsUpdate = {
         const btn = $('#lcRelLoad');
         btn.disabled = true;
         $('#lcRelInfo').textContent = '正在获取…';
-        let url = '/api/llamacpp/release/latest';
-        if (this.proxy()) url += '?proxy=' + encodeURIComponent(this.proxy());
+        // 上游把 b* 构建全部标成 prerelease，/releases/latest 只会返回空的 v0.x.y，
+        // 所以拉列表取最近 10 个构建版本。
+        let url = '/api/llamacpp/releases?limit=10';
+        if (this.proxy()) url += '&proxy=' + encodeURIComponent(this.proxy());
         api(url).then(r => {
             btn.disabled = false;
             if (!r || !r.success || !r.data) {
                 $('#lcRelInfo').textContent = (r && r.error) || '加载失败';
                 return;
             }
-            this.lcData = r.data;
+            this.lcReleases = Array.isArray(r.data.releases) ? r.data.releases : [];
             this.lcInstalled = Array.isArray(r.data.localBackends) ? r.data.localBackends : [];
             this.lcCudarts = Array.isArray(r.data.localCudarts) ? r.data.localCudarts : [];
-            let info = '最新版本：' + (r.data.tag_name || '-');
-            if (r.data.published_at) info += ' · ' + new Date(r.data.published_at).toLocaleString();
-            $('#lcRelInfo').innerHTML = esc(info) +
-                (r.data.html_url ? ' · <a class="link" target="_blank" rel="noopener" href="' + esc(r.data.html_url) + '">Release</a>' : '');
-            this.renderLcAssets();
+            const sel = $('#lcRelSel');
+            sel.innerHTML = this.lcReleases.map(x => {
+                const when = x.published_at ? ' · ' + new Date(x.published_at).toLocaleString() : '';
+                return '<option value="' + esc(x.tag_name) + '">' + esc(x.tag_name) + esc(when) + '</option>';
+            }).join('');
+            sel.onchange = () => this.selectLcRelease(sel.value);
+            this.selectLcRelease(this.lcReleases.length ? this.lcReleases[0].tag_name : '');
         }).catch(() => { btn.disabled = false; $('#lcRelInfo').textContent = '网络请求失败'; });
+    },
+
+    selectLcRelease(tag) {
+        const hit = (this.lcReleases || []).find(x => x.tag_name === tag) || null;
+        if (!hit) return;
+        this.lcData = hit;
+        const sel = $('#lcRelSel');
+        if (sel && sel.value !== tag) sel.value = tag;
+        let info = '当前版本：' + (hit.tag_name || '-') +
+            (hit.published_at ? ' · ' + new Date(hit.published_at).toLocaleString() : '');
+        $('#lcRelInfo').innerHTML = esc(info) +
+            (hit.html_url ? ' · <a class="link" target="_blank" rel="noopener" href="' + esc(hit.html_url) + '">Release</a>' : '');
+        this.renderLcAssets();
     },
 
     renderLcAssets() {

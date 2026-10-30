@@ -24,10 +24,9 @@ import org.mark.llamacpp.server.NodeManager;
 import org.mark.llamacpp.server.controller.BaseController;
 import org.mark.llamacpp.server.controller.AutoLoadPolicyController;
 import org.mark.llamacpp.server.controller.BuildController;
-import org.mark.llamacpp.server.controller.ChatStateController;
-import org.mark.llamacpp.server.controller.EasyChatController;
 import org.mark.llamacpp.server.controller.HuggingFaceController;
 import org.mark.llamacpp.server.controller.LlamacppController;
+import org.mark.llamacpp.server.controller.ChatProxyController;
 import org.mark.llamacpp.server.controller.ModelActionController;
 import org.mark.llamacpp.server.controller.ModelInfoController;
 import org.mark.llamacpp.server.controller.ModelPathController;
@@ -94,10 +93,9 @@ public class BasicRouterHandler extends SimpleChannelInboundHandler<FullHttpRequ
 	
 	
 	static {
-		pipeline.add(new ChatStateController());
-		pipeline.add(new EasyChatController());
 		pipeline.add(new HuggingFaceController());
 		pipeline.add(new LlamacppController());
+		pipeline.add(new ChatProxyController());
 		pipeline.add(new ModelActionController());
 		pipeline.add(new PerplexityController());
 		pipeline.add(new ModelInfoController());

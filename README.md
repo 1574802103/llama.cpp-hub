@@ -1,233 +1,273 @@
-# llama.cpp-hub
+# llama.cpp-hub（维护版）
 
-[🇬🇧 English](./README-EN.md) | [🇨🇳 中文](./README.md)
+给 llama.cpp 套一个可视化的 Web 外壳：模型加载、参数调节、性能测试、用量统计都在一个页面里完成。
+**聊天直接用 llama.cpp 自带 WebUI**，hub 只负责启停和配置——聊天界面永远跟着 llama.cpp 官方升级走。
 
-> ⚠️ **项目状态**：功能已趋于完善，BUG 也不算多（但依然存在）。作者目前动力不足，暂时不会继续维护或增加新功能。
-
-> **请不要将重要内容存放在Easy Chat。**
-> **每个模型放在单独的文件夹中，担心mmproj文件的话，也放到单独的文件夹，启动参数中选择它即可。**
-
-
-给 llama.cpp 套个 Web 壳 — 用图形化的Web页面来操作模型和llama.cpp。内置了很多花里胡哨的功能。
+> **项目状态**：原作者（[IIIIIllllIIIIIlllll/llama.cpp-hub](https://github.com/IIIIIllllIIIIIlllll/llama.cpp-hub)）已停止维护。
+> 本仓库是接续维护的版本，基线 **0.9.8.3**，所有改动记录在 [docs/CHANGELOG.md](./docs/CHANGELOG.md)。
 
 ---
 
-![image](./screenshot/laika.jpg)
+## 目录
+
+- [核心概念](#核心概念)
+- [功能](#功能)
+- [快速开始](#快速开始)
+- [目录结构](#目录结构)
+- [端口布局](#端口布局)
+- [聊天台（重点）](#聊天台重点)
+- [配置说明](#配置说明)
+- [本次维护改了什么](#本次维护改了什么)
+- [常见问题](#常见问题)
+- [安全声明](#安全声明)
+- [技术栈与编译](#技术栈与编译)
 
 ---
 
-> 💡 **PWA 支持**：本应用是渐进式 Web 应用（PWA），可直接在浏览器中安装到桌面/任务栏，获得类似原生应用的体验。不会考虑单独开发桌面应用版本。
+## 核心概念
+
+| 东西 | 是什么 |
+|---|---|
+| **llama.cpp-hub** | 一个 Java 写的本地 Web 服务（默认 8080），管模型、管参数、管进程 |
+| **实例进程** | 每个模型加载时起一个独立的 `llama-server.exe`，端口自动分配（8081+） |
+| **聊天台** | hub 固定端口 **8100** 上的代理，把 llama.cpp 自带 WebUI 端出来，所有模型共用同一个 origin |
+| **配置** | `config/` 下的 JSON：模型列表、启动参数、聊天台设置，全部在项目目录内，复制项目即带走 |
 
 ---
 
 ## 功能
 
-### 模型操作
+### 模型管理
 
-- 加载 / 卸载 GGUF 模型
-- 每个模型可保存多套启动配置和采样信息，随时切换
-- 自动识别同目录下的mmproj文件，允许用户自行选择草稿模型
-- 可以配置多种不同版本的llama.cpp，选择指定版本加载模型
-- 设置聊天模板，自定义kwargs
-- 嵌入模型和重排序模型需在加载页面手动开启对应功能
+- 加载 / 停止 GGUF 模型，实时显示运行状态、并发槽位、Token 速度
+- **每个模型可存多套启动配置**（命令行、设备、显存、采样、模板），随时切换
+- **多版本 llama.cpp 并存**，每个模型可选不同版本；模型列表支持**批量切换版本**（全选 / 半选 / 逐个取消）
+- 自动识别同目录的 `mmproj`（视觉/音频），也可手动指定
+- 克隆体：同一个 GGUF 文件用不同参数起两个实例
+- 自动加载 / 自动卸载策略：默认「允许」，空闲 **5 分钟**卸载（模型卡片里可改）
+- 按目录扫描，一个模型一个文件夹（见[常见问题](#常见问题)）
 
-### 便宜聊天
+### 参数面板
 
-- 一个非常简陋的聊天前端，可以拿来便捷聊天
-- 支持MCP，但是应该没人会在这里用它吧，应该吧应该吧应该吧应该吧应该吧应该吧
-- 不过可以显示llama.cpp的性能指标
-- 还可以设置背景图片、助手头像
-- 噢，还能查看硬件状态
-- 可以输入音频、视频，真是花里胡哨
+- **183 个参数 / 14 个分组**，与 llama.cpp `b11980` 的 `--help` 逐项对齐（默认值、枚举值照抄上游）
+- 鼠标悬停「?」显示说明，**开头就是原始英文参数名**，例如：
+  `--ctx-size：设置模型可用的上下文窗口大小（单位：token）……设置为 0 表示从模型文件元数据读取`
+- 覆盖基础、采样、采样器链、性能与缓存、线程与 CPU 调度、上下文扩展（RoPE/YaRN）、功能开关、
+  服务端与接口、模板与推理、多模态、草稿模型、N-gram 投机解码、LoRA 与控制向量、高级功能
 
-### 多协议 API
+### 聊天（llama.cpp 自带 WebUI）
 
-一个后端同时暴露四种兼容 API（OpenAI、Anthropic、Ollama、LM Studio），已接入对应 SDK 的工具直接换地址即可使用。[协议端口与兼容说明](./NOTES.md#多协议-api)
+- 模型行点**「开始聊天」**→ 新标签页打开该模型的 WebUI（英文界面）
+- **所有模型共用端口 8100**，切换模型时历史是同一份，可以接着聊
+- 每条回复自带模型名（上游字段）；左下角可看「这个模型参与过的会话」
+- **模型启停只由 hub 控制**：打开聊天页不会自动启动任何模型；没运行就显示「未运行」页
+- 聊天记录存在浏览器 IndexedDB，并自动快照到项目内 `data/chat/`，换机器 / 换 llama.cpp 版本都不丢
 
-**⚠️正在考虑移除Ollama和LM Studio的兼容API，我觉得没什么用哎。**
+### 其它
 
-### Web 管理面板
-
-桌面端主力维护，功能完整。移动端 ⚠️ 长期缺维护，存在 UI 问题。
-
-- 模型列表 + 实时状态
-- 参数调节（采样预设、聊天模板、Slots 状态）
-- WebSocket 实时日志
-- 用量统计（Token 消耗、推理速度）
-- 简易性能基准测试，简单粗暴地塞一堆上下文进去看它什么时候能搞定
-- llama-bench性能基准测试，这东西你得会用熬
-- 模型克隆，让同一个模型（GGUF文件完全相同）使用不同的参数启动两个实例，可能有一点用处
-- 模型搜索，因为国内网络环境的问题，这玩意实际不怎么好用，但是网络通畅的话可以用用
-- 系统信息，查看你的硬件资源，没啥可说的
-
-### 远程节点（服务聚合）
-
-将多台服务器上部署的 llama.cpp-hub 实例聚合到一起，从同一个入口统一管理。[详细说明](./NOTES.md#远程节点)
-
-> **注意：** 请避免在多个节点上使用相同的模型名称/ID。当外部客户端通过主节点的 `/v1/*` API 调用时（如 `/v1/chat/completions`），如果多个节点存在同名模型，系统无法确定应该路由到哪个节点，会导致调用错误。建议在不同节点上使用不同的模型名称，或者在请求体中显式指定 `nodeId`。
-
----
-
-### 内置 MCP 🧪
-
-用于测试模型能否正确执行 tool call。MCP 服务端监听端口 **8075**（需在设置中启用）。
-
-**这些工具用处不大，意义不明，一般来说直接无视。偶尔也能用来接入Agent用来查看硬件资源信息——花里胡哨。**
-
-#### MCP 客户端配置示例
-
-```json
-{
-  "mcpServers": {
-    "llama_hub_info": {
-      "url": "http://localhost:8075/mcp/llama_hub_info",
-      "transportType": "streamable-http"
-    }
-  }
-}
-```
-
----
-
-### 下载管理器 ⚠️
-
-- 支持 HTTP 断点续传，后端实现较基础。大批量下载建议用 aria2、IDM 等专用工具。
-- 这玩意我主要要来局域网传模型，偶尔才会拿去下载在线的模型。
-- 不止能下载GGUF，啥都行，所以能在特定场合下担任‘文件传输助手’。
-
----
-
-### 在线更新
-
-自动检查 GitHub Release → 下载更新包 → 解压替换。由于使用GitHub的API，因此存在无法访问和403的风险。
-如果自动更新失败，那就自行下载程序包覆盖就行，**记得重启**。
-
----
-
-## 适用人群
-
-- 远程服务器操作太麻烦了，想要省事
-- 有多台机器跑 llama.cpp，想通过一个入口统一管理
-- 喜欢自己编译 llama.cpp，又嫌不同版本堆积在一起很混乱的
-- 记不住 llama.cpp 那成堆的参数，但是又想用
+- **性能测试**：`llama-bench` 与「直连 `/v1/chat/completions` 测 timings」两种
+- **用量报表**：按模型 / 按天统计 token 与速度（只统计经过 hub 的 `/v1` 请求）
+- **WebSocket 实时日志**、系统信息（GPU / 内存）、模型搜索（HF 镜像）、下载管理（断点续传）
+- **多节点聚合**：多台机器上的 hub 用一个入口统一管理
+- **MCP / 内置工具**：走 llama.cpp 原生 `--tools` / `--ui-mcp-proxy` / `--mcp-servers-json`
+- PWA：可安装到桌面 / 任务栏
 
 ---
 
 ## 快速开始
 
-1. 下载包含 llama.cpp 的 Release 程序包，解压
-2. 每个 GGUF 模型需放置在一个独立文件夹中，例如：`models/Qwen3.5-27B-Q8_0/Qwen3.5-27B.gguf`，文件夹名称可自定义
-3. 运行启动脚本：Windows 执行 `.bat`，Linux 执行 `.sh`
+1. 解压程序包（已带 JRE 与 llama.cpp 版本目录）
+2. 把每个 GGUF 放进**独立文件夹**：`models/MyModel/MyModel.gguf`
+3. 启动：
+   - Windows：双击 `llama.cpp-hub.exe`（无控制台，日志见 `launcher.log`），或双击 `run.bat`（带控制台输出）
+   - Linux：`./run.sh`
 4. 浏览器打开 `http://localhost:8080`
-5. 在页面选择模型 → 点击加载 → 开始使用
-6. OK，如果没有启动成功，可能是端口被占用了，默认需要使用8080端口，请确保该端口可用再运行
+5. 模型列表 → 选模型 → 保存启动配置 → 加载；要聊天就点卡片上的「开始聊天」
+6. 若 8080 被占用，改 `config/application.json` 的 `server.webPort`
 
-> **重要**：本项目通过 8080（默认）端口直接访问全部模型，使用其它客户端时，填写该端口即可！无需去检查 llama.cpp 进程的端口。
->
-> **提示**：可以为模型设置「允许自动加载」，开启后模型会出现在 `/v1/models` 列表中，也可以在 Easy Chat 中快速加载和停止。详情查看额外说明中的[「自动加载模型」](./NOTES.md#自动加载模型)部分。
+> 外部客户端（OpenAI / Anthropic SDK 等）一律填 hub 的 8080，不需要管实例端口。
+> `/v1/models` 只返回「运行中的模型」和「允许自动加载的模型」——避免客户端以为没加载的模型也能用。
 
 ---
 
-## 注意事项
+## 目录结构
 
-> **重要**：本应用需要读写文件的权限，无读写权限会导致无法进入网页、无法正常使用功能。如 Windows 11 的 C 盘根目录会导致无法读取文件。
-
-> **提醒**：每个模型需单独放在一个文件夹内，文件夹存放该模型的 GGUF 文件（分片、mmproj 等），不能将不同模型的 GGUF 文件混放。模型只有加载后才会在 `/v1/models` 中显示。
-
-> **提醒**：界面支持英中双语，会根据浏览器语言设置自动切换，也可在 URL 中通过 `?lang=en` 参数手动指定。首页左下角也有个开关方便切换。
-
-> **注意**：/v1/models API端点只会返回 **运行中的模型** 和 **允许自动加载的模型** ，我个人的理解是：如果你的模型没有加载就显示在模型列表里，客户端还以为这些模型都能用呢，结果发现全是用不了的，那太逗了。而可自动加载的模型则会在调用时自行尝试加载，问题不大。
-
-
-## 额外说明
-
-- **多模态** — [自动检索 mmproj，也可手动指定](./NOTES.md#多模态)
-- **MTP** — [两种使用方式说明](./NOTES.md#mtp)
-- **系统信息工具** — [gpu-info 工具说明](./NOTES.md#系统信息工具)
-- **自动加载模型** — [自动加载机制详解](./NOTES.md#自动加载模型)
-- **模型路径** — [模型目录规范](./NOTES.md#模型路径)
-- **用量统计** — [仅统计成功响应的用量](./NOTES.md#用量统计)
-- **磁盘与内存占用** — [JVM 与 llama.cpp 资源消耗说明](./NOTES.md#磁盘与内存占用)
+```
+llama.cpp-hub/
+├─ llama.cpp-hub.exe      启动器（读 launcher.conf，无控制台）
+├─ run.bat / run.sh       直接用 jre 启动（能看到控制台输出）
+├─ launcher.conf          exe 启动器的 JVM 参数与 classpath
+├─ classes/               后端 class + 前端静态资源
+│  ├─ web/                index.html（桌面）、index-new.html（移动）、js/css/i18n
+│  ├─ web/chathub/        聊天台注入脚本 hubchat.js
+│  └─ tools/              gpu-info 等运行时工具（不要删）
+├─ lib/                   依赖 jar（netty / gson / log4j / slf4j）
+├─ jre/                   内置运行时（Temurin 26）
+├─ llamacpp/              各版本 llama.cpp（llama-bXXXXX…），可多版本并存
+├─ models/                默认模型目录（可在设置里改）
+├─ config/
+│  ├─ application.json    服务端口、监听地址、下载目录、安全、HTTPS
+│  ├─ launch_config.json  每个模型的启动配置
+│  ├─ chathub.json        聊天台：端口、按需加载超时、工具与 MCP 开关、历史目录
+│  ├─ modelpaths.json     模型扫描目录
+│  └─ capabilities/       模型能力覆盖（多模态等）
+├─ data/chat/             聊天历史快照（跟项目走）
+├─ cache/                 运行期缓存（record 用量记录、temp）
+├─ logs/                  app.log + 每个模型的进程日志
+├─ backup/                手工备份（如 easy-chat 旧记录 zip）
+└─ docs/                  API.md、CHAT-HUB.md、CHANGELOG.md、legacy/（历史文档）
+```
 
 ---
 
 ## 端口布局
 
-| 端口 | 用途 |
-|------|------|
-| 8080 | WebUI + OpenAI/Anthropic API + WebSocket |
-| 8081+ | 每个已加载模型的推理进程（自动分配） |
-| 11434 | Ollama 兼容 API（已经移除） |
-| 1234 | LM Studio 兼容 API（已经移除） |
-| 8075 | MCP 服务器（可选） |
-
-> ## ⚠️ 安全声明
-> 
-> **本应用是面向局域网的个人工具，不具备互联网级别的安全防护能力。**
-> 
-> 应用默认监听 `0.0.0.0`，如果你在路由器上做了端口转发或使用内网穿透将其暴露到公网，请注意：
-> 
-> - 本应用**没有**完整的身份认证、授权、防攻击机制
-> - 即使开启了 API 密钥验证（`security.apiKeyEnabled`），也仅是最基本的访问控制，不足以抵御恶意攻击
-> - 暴露到公网可能导致模型服务被盗用/滥用、服务器资源被耗尽、聊天记录等数据泄露
-> 
-> **强烈建议：**
-> - 仅在受信任的局域网内使用
-> - 如需公网访问，务必使用反向代理（如 Nginx）自行配置 HTTPS、访问控制、速率限制等
-> - 不要将 8080 或其他服务端口直接暴露到公网
-> 
-> **任何因端口映射/公网暴露导致的损失，后果自负。**
+| 端口 | 用途 | 备注 |
+|---|---|---|
+| **8080** | hub WebUI + `/v1`、`/api` + WebSocket | 对外唯一入口 |
+| **8100** | 聊天台（llama.cpp WebUI 代理） | 固定端口，**不要随便改**，改了历史 origin 就变 |
+| 8081–8199 | 每个模型的 llama-server 实例 | 自动分配，仅本机 |
+| 8075 | 内置 MCP 服务端（可选） | 默认关闭 |
 
 ---
 
-## 技术栈
+## 聊天台（重点）
 
-- 后端：Java 21 + Netty 4.1
-- 前端：Vanilla JS（无框架、无打包器）
-- 模型：llama.cpp 子进程（每个模型独立进程）
+**开一次聊天**：模型列表 →「开始聊天」。没加载的模型会先由 hub 加载，然后打开 `http://<主机>:8100/?m=<模型>`。
 
----
+**为什么历史不会丢**
 
-## AI 工具的使用声明
+- WebUI 的历史存在浏览器 IndexedDB（库名 `LlamaUi`），**按 origin 隔离**；
+- 所有模型共用 8100 这一个 origin，所以换模型看到的是同一份会话列表；
+- hub 还会把会话与设置快照到 `data/chat/*.json.gz`，换电脑时自动灌回；
+- 换 llama.cpp 版本不影响：端口没变、origin 没变，历史还在（b11981 → b11867 实测）。
 
-作为一个非互联网行业的个人开发者，工作之余很难有精力坚持纯手工开发。AI 很好地解决了这个问题——我只需要用尽可能简单的技术方案，配合大量的人工 review 就行。
+**模型启停规则**
 
-这个项目的技术栈十分简单，用 AI 开发其实问题不大。尤其是我不考虑更深层次的功能，作为一个启动 llama.cpp 的壳就足够了。
+- 打开 / 刷新聊天页**不会**启动任何模型；没运行就是一张「未运行」说明页；
+- WebUI 自己的 `/models/load`、`/models/unload` 在聊天台上被禁用（403）；
+- 只有两个入口会启动模型：hub 里点「开始聊天」，或「未运行」页上点「启动模型」；
+- 在 hub 里停止模型 = 杀进程 + 取消加载，立即生效。
 
-开发中大量使用了 **Qwen3.6-27B-FP8** 来制定计划和执行代码编写任务，其次是 **DeepSeek V4 Flash**。早期也用过 GPT 5.2 到 GPT 5.4，但做这种简单的项目太浪费了，就不再使用。
+**已知边界**
 
-Qwen3.6-27B-FP8 是我的救星，帮我做了大量大量大量大量的工作！后来换Q8了，vllm太麻烦。
+- 界面是英文（llama.cpp 自带，无 i18n 层）；
+- 一个标签页对应一个模型，切模型是换标签 / 换 `?m=`；
+- 两个标签页同时开着时，一边新聊的内容要刷新才在另一边出现；
+- 聊天 token 不进入 hub 的用量报表（WebUI 直连实例，不经过 hub）。
 
-无敌的 Qwen3.6-27B 和它没用的主人。
-
-Easy Chat 过于繁琐，我只能引入：Kimi K2.7 + GLM 5.2，也用过几次 ChatGPT 5.5。
-
----
-
-## 编译说明
-
-### 手动编译
-- 注意修改脚本中的 `JAVA_HOME` 路径为实际路径
-- Windows：运行 `javac-win.bat`
-- Linux：运行 `javac-linux.sh`
-
-### 注意
-
-- 请确保 `JAVA_HOME` 指向 JDK 21 或更高版本
-- Windows 使用 CRLF（`\r\n`）作为换行符，Linux 使用 LF（`\n`），修改脚本时请留意
-- 如果编译脚本存在问题，也可作为 Maven 项目导入 IDE 自行操作，或直接下载 Release 程序包
+细节与排错见 [docs/CHAT-HUB.md](./docs/CHAT-HUB.md)。
 
 ---
 
-## 截图预览
-![image](./screenshot/1.png)
-![image](./screenshot/2.png)
-![image](./screenshot/3.png)
-![image](./screenshot/4.png)
-![image](./screenshot/5.png)
-![image](./screenshot/6.png)
-![image](./screenshot/7.png)
-![image](./screenshot/8.png)
-![image](./screenshot/9.png)
-![image](./screenshot/10.png)
-![image](./screenshot/11.png)
+## 配置说明
+
+| 文件 | 关键字段 |
+|---|---|
+| `application.json` | `server.webPort` 端口、`server.listenAddress`（`0.0.0.0` 允许局域网）、`download.directory`、`security.apiKeyEnabled` |
+| `launch_config.json` | 每个模型：`configs`（多套）、`selectedConfig`、`autoLoad`（allow/deny）、`autoUnloadTimeoutMs`（默认 300000） |
+| `chathub.json` | `port`（8100）、`autoLoadTimeoutMs`、`tools`（`all` 或逗号列表）、`uiMcpProxy`、`mcpServersJson`、`historyDir` |
+| `modelpaths.json` | 扫描的模型根目录列表 |
+
+> 改 `application.json` 或 `chathub.json` 的端口后需要**重启 hub**。
+
+---
+
+## 本次维护改了什么
+
+接续维护后做的改动（细节与验证方式见 [docs/CHANGELOG.md](./docs/CHANGELOG.md)）：
+
+| # | 内容 |
+|---|---|
+| 1 | llama.cpp 版本下载改为「最近 10 个构建」，兼容上游 prerelease 与 `win-cpu-x64` 资产命名 |
+| 2 | 修复 b11867 起模型加载不出来（就绪判定不再绑定日志线程名，改用 `/health` 兜底） |
+| 3 | 模型图标按「名称优先、架构兜底」匹配，GLM 不再显示成 DeepSeek 图标 |
+| 4 | 自动卸载默认 5 分钟，新模型默认勾选「允许自动加载 / 自动卸载」 |
+| 5 | 参数面板按 b11980 重做：183 项 / 14 组，默认值与枚举照抄上游，说明以 `--参数名：` 开头 |
+| 6 | 模型列表新增「批量切换 llama.cpp 版本」（全选 / 半选 / 逐个取消，运行中提示重启生效） |
+| 7 | 聊天改为 llama.cpp 自带 WebUI（聊天台），EasyChat 整体删除；历史落 `data/chat/`，可跨模型续聊 |
+| 8 | 聊天台模型列表与 hub 模型列表同源；行内启停（运行中红方块 / 未运行绿三角） |
+| 9 | 「刷新模型列表」补上完成提示与转圈，扫描超过 10 秒给等待提示 |
+| 10 | 模型启停收敛到 hub：打开聊天页不再自动拉起模型，WebUI 无法自行启停 |
+| 11 | 清理：EasyChat 旧记录打包到 `backup/`、历史文档归档 `docs/legacy/`、日志保留最近 7 天 |
+
+---
+
+## 常见问题
+
+**Q：点「开始聊天」返回 `{"error":{"message":"File Not Found","code":404}}`？**
+旧配置里存了 `--no-webui`，带它的 llama-server 不提供界面。现在启动时会自动剥离该参数；
+如果还出现，到模型配置里删掉 `--no-webui` 后重新加载（重启 hub 后新起的实例都是干净的）。
+
+**Q：模型加载失败 / 进度卡住？**
+看 `logs/<模型名>.log`。常见原因：llama.cpp 的 CUDA 版本与显卡不匹配、显存不足、`mmproj` 路径失效、
+启动参数用了新版本已删除的项。加载前 hub 会做显存估算，估算不通过会直接拒绝。
+
+**Q：聊天历史「不见了」？**
+确认地址还是 `http://<同一主机>:8100`。历史绑定 origin（host + port），换端口或换浏览器 profile
+就会看到空的。项目内的历史在 `data/chat/`，换机器会自动恢复。
+
+**Q：刷新模型列表很慢？**
+`/api/models/refresh` 是同步重扫目录 + 读 GGUF 头，模型多时要几十秒，页面会转圈并给等待提示。
+
+**Q：端口占用 / 启动失败？**
+8080 被占用改 `server.webPort`；8100 被占用改 `chathub.json` 的 `port`（注意：改了聊天就换了历史 origin）。
+异常退出后若残留 `llama-server.exe`，重新启动 hub 会自动清理。
+
+**Q：为什么一个文件夹里只能放一个模型？**
+hub 按「目录 = 模型」扫描：一个文件夹里的 GGUF（含分片）视为同一个模型，文件夹名就是模型 ID。
+不同模型混放会被当成一个，`mmproj` 也可能认错。
+
+**Q：能暴露到公网吗？**
+不建议，见下方安全声明。
+
+---
+
+## 安全声明
+
+> **本应用是面向局域网的个人工具，不具备互联网级安全防护。**
+>
+> - 默认监听 `0.0.0.0`；若做了端口转发 / 内网穿透，请自行用反向代理加 HTTPS、访问控制、限流
+> - `security.apiKeyEnabled` 只保护 `/v1`，不是完整认证
+> - 聊天台按设计**不自动启动模型**，但模型一旦运行，其实例端口在本机可达
+> - 内置工具（`--tools`）能让模型读写文件 / 执行命令，**只在可信环境开启**
+>
+> 因公网暴露导致的任何损失，后果自负。
+
+---
+
+## 技术栈与编译
+
+- 后端：Java 21 语法（随包 JRE 为 Temurin 26）+ Netty 4.1.35 + Gson + Log4j2
+- 前端：原生 JS（无框架、无打包器）
+- 模型：llama.cpp 子进程，一个模型一个进程
+
+改动 Java 源码后重新编译：
+
+```bash
+# 需要 JDK 21+
+find src/main/java -name "*.java" > build/srcs.txt
+javac -source 21 -target 21 -encoding UTF-8 -nowarn -d build/classes -cp "lib/*" @build/srcs.txt
+cp -a src/main/resources/. build/classes/     # 前端资源
+```
+
+> 部署时**不要整目录覆盖** `classes/`：`classes/tools/` 里的二进制（如 `gpu-info-x64.exe`）
+> 不在源码里，覆盖会丢。建议按文件比对后只替换改动项。
+> 维护流程（源码获取、参数校验脚本、验证方法）见 `docs/CHANGELOG.md` 与 `docs/CHAT-HUB.md`。
+
+---
+
+## 相关文档
+
+- [docs/API.md](./docs/API.md) — HTTP 接口清单（含聊天台接口）
+- [docs/CHAT-HUB.md](./docs/CHAT-HUB.md) — 聊天台设计、部署与排错
+- [docs/CHAT-WEBUI-RESEARCH.md](./docs/CHAT-WEBUI-RESEARCH.md) — EasyChat vs llama.cpp WebUI 的调研与结论
+- [docs/CHANGELOG.md](./docs/CHANGELOG.md) — 每次改动的「为什么」与验证方式
+- [docs/legacy/](./docs/legacy/) — 原项目历史文档（auto-fit、ngram、id_slot、ROCm 等）
+
+---
+
+## 致谢
+
+原项目 [IIIIIllllIIIIIlllll/llama.cpp-hub](https://github.com/IIIIIllllIIIIIlllll/llama.cpp-hub) 提供了完整的产品骨架与前端；
+上游 [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) 提供全部推理能力与自带 WebUI。

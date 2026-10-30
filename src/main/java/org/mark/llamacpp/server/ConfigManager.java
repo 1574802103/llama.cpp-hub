@@ -126,8 +126,15 @@ public class ConfigManager {
 		synchronized (launchFileLock) {
 			try {
 				Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+				boolean isNewModel = !allConfigs.containsKey(modelId);
 				Map<String, Object> entry = allConfigs.get(modelId);
 				Map<String, Object> normalized = normalizeLaunchConfigEntry(entry);
+				// 新模型首次保存配置时补上默认策略：允许自动加载、允许自动卸载、空闲 5 分钟卸载
+				if (isNewModel) {
+					normalized.putIfAbsent("autoLoad", DEFAULT_AUTO_LOAD_POLICY);
+					normalized.putIfAbsent("autoUnload", DEFAULT_AUTO_UNLOAD_POLICY);
+					normalized.putIfAbsent("autoUnloadTimeoutMs", DEFAULT_AUTO_UNLOAD_TIMEOUT_MS);
+				}
 				Map<String, Object> configs = getConfigItems(normalized);
 				if (configs == null) {
 					configs = new HashMap<>();
@@ -145,6 +152,53 @@ public class ConfigManager {
 			} catch (IOException e) {
 				logger.info("保存启动配置失败: {}", e);
 				return false;
+			}
+		}
+	}
+
+	/**
+	 * 把某个模型的所有启动配置切换到指定的 llama.cpp 版本目录。
+	 *
+	 * <p>批量化需求：模型列表里按模型批量换版本时用。只改每个配置里的
+	 * {@code llamaBinPathSelect} 字段，其它参数（命令行、采样、env）原样保留；
+	 * 一次读盘、一次写盘，避免逐个模型保存时互相覆盖。</p>
+	 *
+	 * @param modelId 模型 ID（克隆体也适用）
+	 * @param binPath llama.cpp 版本目录的绝对路径
+	 * @return 实际更新的配置个数；0 表示该模型没有启动配置
+	 */
+	@SuppressWarnings("unchecked")
+	public int setLlamaBinPathForModel(String modelId, String binPath) {
+		synchronized (launchFileLock) {
+			try {
+				Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+				Map<String, Object> entry = allConfigs.get(modelId);
+				if (entry == null) {
+					return 0;
+				}
+				Map<String, Object> normalized = normalizeLaunchConfigEntry(entry);
+				Map<String, Object> configs = getConfigItems(normalized);
+				if (configs == null || configs.isEmpty()) {
+					return 0;
+				}
+				int updated = 0;
+				for (Map.Entry<String, Object> configItem : configs.entrySet()) {
+					if (!(configItem.getValue() instanceof Map<?, ?>)) {
+						continue;
+					}
+					((Map<String, Object>) configItem.getValue()).put("llamaBinPathSelect", binPath);
+					updated++;
+				}
+				if (updated == 0) {
+					return 0;
+				}
+				allConfigs.put(modelId, normalized);
+				writeJsonFileAtomic(LAUNCH_CONFIG_FILE, allConfigs);
+				logger.info("已切换模型 llama.cpp 版本: modelId={}, binPath={}, configs={}", modelId, binPath, updated);
+				return updated;
+			} catch (IOException e) {
+				logger.warn("切换模型 llama.cpp 版本失败: modelId={}, error={}", modelId, e.getMessage());
+				return 0;
 			}
 		}
 	}
@@ -941,20 +995,28 @@ public class ConfigManager {
 	}
 
 	/**
+	 * 新建模型条目的默认策略：允许自动加载、允许自动卸载，空闲 5 分钟后卸载。
+	 * 与前端「加载模型」弹窗里的默认勾选状态保持一致。
+	 */
+	public static final String DEFAULT_AUTO_LOAD_POLICY = "allow";
+	public static final String DEFAULT_AUTO_UNLOAD_POLICY = "allow";
+	public static final long DEFAULT_AUTO_UNLOAD_TIMEOUT_MS = 300_000L;
+
+	/**
 	 * 获取模型的自动加载策略
 	 * @param modelId 模型 ID
-	 * @return "allow", "deny", 或 null（未设置）
+	 * @return "allow" 或 "deny"；未设置时返回默认值 "allow"
 	 */
 	public String getAutoLoadPolicy(String modelId) {
 		synchronized (launchFileLock) {
 			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
 			Map<String, Object> entry = allConfigs.get(modelId);
 			if (entry == null) {
-				return null;
+				return DEFAULT_AUTO_LOAD_POLICY;
 			}
 			Object autoLoad = entry.get("autoLoad");
 			if (autoLoad == null) {
-				return null;
+				return DEFAULT_AUTO_LOAD_POLICY;
 			}
 			return String.valueOf(autoLoad);
 		}
@@ -962,7 +1024,7 @@ public class ConfigManager {
 
 	/**
 	 * 批量获取所有模型的自动加载策略（一次性读取配置文件）
-	 * @return 模型ID到策略的映射
+	 * @return 模型ID到策略的映射，未设置的按默认值补齐
 	 */
 	public Map<String, String> getAllAutoLoadPolicies() {
 		synchronized (launchFileLock) {
@@ -970,9 +1032,7 @@ public class ConfigManager {
 			Map<String, String> policies = new HashMap<>();
 			for (Map.Entry<String, Map<String, Object>> entry : allConfigs.entrySet()) {
 				Object autoLoad = entry.getValue().get("autoLoad");
-				if (autoLoad != null) {
-					policies.put(entry.getKey(), String.valueOf(autoLoad));
-				}
+				policies.put(entry.getKey(), autoLoad == null ? DEFAULT_AUTO_LOAD_POLICY : String.valueOf(autoLoad));
 			}
 			return policies;
 		}
@@ -1031,18 +1091,18 @@ public class ConfigManager {
 	/**
 	 * 获取模型的自动卸载策略
 	 * @param modelId 模型 ID
-	 * @return "allow", "deny", 或 null（未设置）
+	 * @return "allow" 或 "deny"；未设置时返回默认值 "allow"
 	 */
 	public String getAutoUnloadPolicy(String modelId) {
 		synchronized (launchFileLock) {
 			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
 			Map<String, Object> entry = allConfigs.get(modelId);
 			if (entry == null) {
-				return null;
+				return DEFAULT_AUTO_UNLOAD_POLICY;
 			}
 			Object autoUnload = entry.get("autoUnload");
 			if (autoUnload == null) {
-				return null;
+				return DEFAULT_AUTO_UNLOAD_POLICY;
 			}
 			return String.valueOf(autoUnload);
 		}
@@ -1050,7 +1110,7 @@ public class ConfigManager {
 
 	/**
 	 * 批量获取所有模型的自动卸载策略（一次性读取配置文件）
-	 * @return 模型ID到策略的映射
+	 * @return 模型ID到策略的映射，未设置的按默认值补齐
 	 */
 	public Map<String, String> getAllAutoUnloadPolicies() {
 		synchronized (launchFileLock) {
@@ -1058,9 +1118,7 @@ public class ConfigManager {
 			Map<String, String> policies = new HashMap<>();
 			for (Map.Entry<String, Map<String, Object>> entry : allConfigs.entrySet()) {
 				Object autoUnload = entry.getValue().get("autoUnload");
-				if (autoUnload != null) {
-					policies.put(entry.getKey(), String.valueOf(autoUnload));
-				}
+				policies.put(entry.getKey(), autoUnload == null ? DEFAULT_AUTO_UNLOAD_POLICY : String.valueOf(autoUnload));
 			}
 			return policies;
 		}
@@ -1068,7 +1126,7 @@ public class ConfigManager {
 
 	/**
 	 * 批量获取所有模型的自动卸载超时时间（一次性读取配置文件）
-	 * @return 模型ID到超时时间（毫秒）的映射，未设置的不包含在内
+	 * @return 模型ID到超时时间（毫秒）的映射，未设置的按默认值 5 分钟补齐
 	 */
 	public Map<String, Long> getAllAutoUnloadTimeouts() {
 		synchronized (launchFileLock) {
@@ -1076,12 +1134,15 @@ public class ConfigManager {
 			Map<String, Long> timeouts = new HashMap<>();
 			for (Map.Entry<String, Map<String, Object>> entry : allConfigs.entrySet()) {
 				Object timeout = entry.getValue().get("autoUnloadTimeoutMs");
-				if (timeout != null) {
-					try {
-						timeouts.put(entry.getKey(), ((Number) timeout).longValue());
-					} catch (Exception e) {
-						// 忽略格式错误的超时值
-					}
+				if (timeout == null) {
+					timeouts.put(entry.getKey(), DEFAULT_AUTO_UNLOAD_TIMEOUT_MS);
+					continue;
+				}
+				try {
+					timeouts.put(entry.getKey(), ((Number) timeout).longValue());
+				} catch (Exception e) {
+					// 忽略格式错误的超时值，回退到默认值
+					timeouts.put(entry.getKey(), DEFAULT_AUTO_UNLOAD_TIMEOUT_MS);
 				}
 			}
 			return timeouts;
@@ -1141,18 +1202,18 @@ public class ConfigManager {
 	/**
 	 * 获取模型的自动卸载超时时间（毫秒）
 	 * @param modelId 模型 ID
-	 * @return 超时时间，未设置返回 null
+	 * @return 超时时间，未设置返回默认值 5 分钟
 	 */
 	public Long getAutoUnloadTimeoutMs(String modelId) {
 		synchronized (launchFileLock) {
 			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
 			Map<String, Object> entry = allConfigs.get(modelId);
 			if (entry == null) {
-				return null;
+				return DEFAULT_AUTO_UNLOAD_TIMEOUT_MS;
 			}
 			Object timeout = entry.get("autoUnloadTimeoutMs");
 			if (timeout == null) {
-				return null;
+				return DEFAULT_AUTO_UNLOAD_TIMEOUT_MS;
 			}
 			try {
 				return ((Number) timeout).longValue();

@@ -38,6 +38,7 @@
 
     let _llamacppLoaded = false;
     let _llamacppReleaseData = null;
+    let _llamacppReleases = [];
     let _llamacppDownloading = {};
     let _llamacppLocalBackends = [];
     let _llamacppLocalCudarts = [];
@@ -118,8 +119,10 @@
         try {
             var proxy = byId('llamacppProxySelect');
             var proxyVal = proxy ? proxy.value : '';
-            var url = '/api/llamacpp/release/latest';
-            if (proxyVal) url += '?proxy=' + encodeURIComponent(proxyVal);
+            // 上游把 b* 构建全部标成 prerelease，/releases/latest 只会返回空的 v0.x.y，
+            // 所以改成拉列表，取最近 10 个构建版本。
+            var url = '/api/llamacpp/releases?limit=10';
+            if (proxyVal) url += '&proxy=' + encodeURIComponent(proxyVal);
 
             var resp = await fetch(url, { method: 'GET' });
             var result = await resp.json();
@@ -136,11 +139,18 @@
                 return;
             }
 
+            var releases = Array.isArray(result.data.releases) ? result.data.releases : [];
             _llamacppLoaded = true;
-            _llamacppReleaseData = result.data;
+            _llamacppReleases = releases;
             _llamacppLocalBackends = Array.isArray(result.data.localBackends) ? result.data.localBackends : [];
             _llamacppLocalCudarts = Array.isArray(result.data.localCudarts) ? result.data.localCudarts : [];
-            renderLlamaCppRelease(result.data);
+            renderLlamaCppVersionOptions(releases);
+            _llamacppReleaseData = releases.length ? releases[0] : (result.data.latest || null);
+            if (_llamacppReleaseData) {
+                renderLlamaCppRelease(_llamacppReleaseData);
+            } else if (emptyEl) {
+                emptyEl.style.display = '';
+            }
 
         } catch (e) {
             if (loadingEl) loadingEl.style.display = 'none';
@@ -150,6 +160,43 @@
                 errorEl.textContent = t('common.network_request_failed', '网络请求失败');
             }
             if (emptyEl) emptyEl.style.display = '';
+        }
+    }
+
+    // 把最近 10 个版本填进下拉框
+    function renderLlamaCppVersionOptions(releases) {
+        var sel = byId('llamacppVersionSelect');
+        if (!sel) return;
+        var html = '';
+        for (var i = 0; i < releases.length; i++) {
+            var r = releases[i];
+            var tag = r.tag_name || '';
+            var when = '';
+            if (r.published_at) {
+                try {
+                    when = ' · ' + new Date(r.published_at).toLocaleString();
+                } catch (e) {
+                    when = ' · ' + r.published_at;
+                }
+            }
+            html += '<option value="' + tag + '">' + tag + when + '</option>';
+        }
+        sel.innerHTML = html;
+        sel.style.display = releases.length ? '' : 'none';
+        if (releases.length) sel.value = releases[0].tag_name || '';
+    }
+
+    // 切到某个版本：只换资产列表，不重新请求
+    function selectLlamaCppVersion(tag) {
+        if (!tag) return;
+        var sel = byId('llamacppVersionSelect');
+        if (sel && sel.value !== tag) sel.value = tag;
+        for (var i = 0; i < _llamacppReleases.length; i++) {
+            if (_llamacppReleases[i].tag_name === tag) {
+                _llamacppReleaseData = _llamacppReleases[i];
+                renderLlamaCppRelease(_llamacppReleaseData);
+                return;
+            }
         }
     }
 
@@ -2274,7 +2321,7 @@
     window.applyUpdate = applyUpdate;
     window.cancelUpdateDownload = cancelUpdateDownload;
     window.onAppUpdateEvent = handleAppUpdateEvent;
-    window.SettingsPage = { init, load, switchTab, switchUpdateSubTab, openNodeForm, saveNodeForm, editNode, removeNode, testNode, toggleNode, saveNodeRole, loadLlamaCppReleases, downloadLlamaCppAsset, onLlamaCppDownloadProgress };
+    window.SettingsPage = { init, load, switchTab, switchUpdateSubTab, openNodeForm, saveNodeForm, editNode, removeNode, testNode, toggleNode, saveNodeRole, loadLlamaCppReleases, selectLlamaCppVersion, downloadLlamaCppAsset, onLlamaCppDownloadProgress };
     window.loadLlamaCppList = loadLlamaCppList;
     window.addLlamaCpp = addLlamaCpp;
     window.editLlamaCpp = editLlamaCpp;

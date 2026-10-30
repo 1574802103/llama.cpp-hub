@@ -156,6 +156,11 @@ public class ModelActionController implements BaseController {
 			this.handleStopModelRequest(ctx, request);
 			return true;
 		}
+		// 批量切换多个模型的 llama.cpp 版本
+		if (uri.equals("/api/models/launch/batch-bin")) {
+			this.handleBatchSetLlamaBinPath(ctx, request);
+			return true;
+		}
 		// 执行benchmark
 		if (uri.equals("/api/models/benchmark")) {
 			this.handleModelBenchmark(ctx, request);
@@ -293,7 +298,7 @@ public class ModelActionController implements BaseController {
 				return;
 			}
 
-			List<Map<String, Object>> modelList = this.buildLocalModelList();
+			List<Map<String, Object>> modelList = ModelActionController.buildLocalModelList();
 
 			List<LlamaHubNode> enabledNodes = NodeManager.getInstance().listEnabledNodes();
 			for (LlamaHubNode node : enabledNodes) {
@@ -317,7 +322,7 @@ public class ModelActionController implements BaseController {
 	/**
 	 * 构建本地模型列表
 	 */
-	private List<Map<String, Object>> buildLocalModelList() {
+	public static List<Map<String, Object>> buildLocalModelList() {
 		LlamaServerManager manager = LlamaServerManager.getInstance();
 		List<GGUFModel> models = manager.listModel();
 
@@ -572,6 +577,104 @@ public class ModelActionController implements BaseController {
 			logger.info("停止模型时发生错误", e);
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.error(I18N_MODEL_STOP_FAILED + ": " + e.getMessage()));
 		}
+	}
+
+	/**
+	 * 批量把多个模型的启动配置切换到同一个 llama.cpp 版本目录。
+	 *
+	 * <p>请求体：{@code {"llamaBinPath":"E:\\...\\llama-b11980-bin-win-cuda-13.4-x64","modelIds":["a","b"]}}。
+	 * 每个模型只改它所有启动配置里的 {@code llamaBinPathSelect}，其它参数保持不动；
+	 * 正在运行的模型会一并改配置，但要重启模型才用上新版本（响应里用 running 标出来）。</p>
+	 */
+	private void handleBatchSetLlamaBinPath(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+		this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持 POST 请求");
+		try {
+			byte[] bodyBytes = JsonUtil.readRequestBytes(request);
+			if (bodyBytes == null || bodyBytes.length == 0) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
+				return;
+			}
+			JsonObject json = JsonUtil.tryParseObject(bodyBytes);
+			if (json == null) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体不是合法的 JSON"));
+				return;
+			}
+			String binPath = JsonUtil.getJsonString(json, "llamaBinPath", "");
+			binPath = binPath == null ? "" : binPath.trim();
+			if (binPath.isEmpty()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少 llamaBinPath 参数"));
+				return;
+			}
+			File dir = new File(binPath);
+			if (!dir.isDirectory()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("版本目录不存在: " + binPath));
+				return;
+			}
+			File serverExe = new File(dir, "llama-server.exe");
+			if (!serverExe.isFile()) {
+				serverExe = new File(dir, "llama-server");
+			}
+			if (!serverExe.isFile()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("该目录下没有 llama-server: " + binPath));
+				return;
+			}
+
+			List<String> modelIds = JsonUtil.getJsonStringList(json.get("modelIds"));
+			if (modelIds == null || modelIds.isEmpty()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("没有选择任何模型"));
+				return;
+			}
+
+			ConfigManager configManager = ConfigManager.getInstance();
+			LlamaServerManager manager = LlamaServerManager.getInstance();
+			List<String> updated = new ArrayList<>();
+			List<String> running = new ArrayList<>();
+			List<Map<String, String>> skipped = new ArrayList<>();
+
+			for (String rawId : modelIds) {
+				if (rawId == null || rawId.trim().isEmpty()) {
+					continue;
+				}
+				String modelId = rawId.trim();
+				if (manager.resolveModelId(modelId) == null) {
+					skipped.add(this.batchSkipInfo(modelId, "模型不存在"));
+					continue;
+				}
+				int changed = configManager.setLlamaBinPathForModel(modelId, binPath);
+				if (changed <= 0) {
+					skipped.add(this.batchSkipInfo(modelId, "未配置启动参数"));
+					continue;
+				}
+				updated.add(modelId);
+				if (manager.getLoadedProcesses().containsKey(modelId)) {
+					running.add(modelId);
+				}
+			}
+
+			Map<String, Object> data = new HashMap<>();
+			data.put("llamaBinPath", binPath);
+			data.put("versionName", dir.getName());
+			data.put("updated", updated);
+			data.put("updatedCount", updated.size());
+			data.put("skipped", skipped);
+			data.put("running", running);
+			logger.info("[批量切版本] 目标={}, 成功={}, 跳过={}, 运行中={}", dir.getName(), updated.size(), skipped.size(), running.size());
+
+			Map<String, Object> result = new HashMap<>();
+			result.put("success", true);
+			result.put("data", data);
+			LlamaServer.sendJsonResponse(ctx, result);
+		} catch (Exception e) {
+			logger.info("批量切换 llama.cpp 版本时发生错误", e);
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("批量切换失败: " + e.getMessage()));
+		}
+	}
+
+	private Map<String, String> batchSkipInfo(String modelId, String reason) {
+		Map<String, String> item = new HashMap<>();
+		item.put("modelId", modelId);
+		item.put("reason", reason);
+		return item;
 	}
 
 	/**

@@ -134,6 +134,12 @@ public class LlamacppController implements BaseController {
 			return true;
 		}
 		
+		// 获取最近若干个 release（版本列表）
+		if (uri.equals("/api/llamacpp/releases")) {
+			this.handleLlamaCppReleases(ctx, request);
+			return true;
+		}
+
 		// 获取最新 release
 		if (uri.equals("/api/llamacpp/release/latest")) {
 			this.handleLlamaCppReleaseLatest(ctx, request);
@@ -640,24 +646,254 @@ public class LlamacppController implements BaseController {
 	
 	private boolean isRelevantLlamaCppAsset(String name) {
 		if (name == null || name.isEmpty()) return false;
-		String lower = name.toLowerCase();
-		// x64 only
-		if (!lower.contains("-x64")) return false;
-		// OS: win or ubuntu/linux only
-		if (!lower.contains("win-") && !lower.contains("ubuntu-") && !lower.contains("linux-")) return false;
-		// Backend: vulkan, cuda, hip, rocm, sycl, or cpu (no backend keyword, e.g. win-x64 / ubuntu-x64)
-		if (lower.contains("-vulkan-") || lower.contains("-cuda-") || lower.contains("-hip-") || lower.contains("-rocm-") || lower.contains("-sycl-")) {
-			return true;
+		String lower = name.toLowerCase(Locale.ROOT);
+		// 只要压缩包
+		if (!lower.endsWith(".zip") && !lower.endsWith(".tar.gz") && !lower.endsWith(".tgz")) {
+			return false;
 		}
-		// CPU: OS segment followed directly by -x64 (e.g. win-x64, ubuntu-x64, linux-x64)
-		if (lower.contains("win-x64") || lower.contains("ubuntu-x64") || lower.contains("linux-x64")) {
-			return true;
+		// 只看 x64：排除 arm64 / aarch64 构建
+		if (lower.contains("arm64") || lower.contains("aarch64")) {
+			return false;
 		}
-		return false;
+		if (!lower.contains("x64")) {
+			return false;
+		}
+		// 平台：Windows / Linux 构建（上游命名历代有 bin-win-x64、bin-win-cpu-x64、
+		// bin-win-cuda-13.4-x64、bin-ubuntu-cuda-12.8-x64 等多种形态，一律放行）
+		return lower.contains("-win-") || lower.contains("win-")
+				|| lower.contains("-ubuntu-") || lower.contains("-linux-");
+	}
+
+	private static final java.util.regex.Pattern LLAMA_CPP_BUILD_TAG =
+			java.util.regex.Pattern.compile("^b\\d+$");
+
+	/**
+	 * 读取 query 参数里的加速地址（proxy），空值返回 null。
+	 */
+	private String resolveProxyParam(FullHttpRequest request) {
+		Map<String, String> params = ParamTool.getQueryParam(request.uri());
+		String proxy = params.get("proxy");
+		if (proxy == null || proxy.trim().isEmpty()) {
+			return null;
+		}
+		return proxy.trim();
 	}
 
 	/**
-	 * 获取最新 llama.cpp release 信息。
+	 * 版本号排序用的 key（b11979 -&gt; 11979），非 b 版本排在最后。
+	 */
+	private long buildTagOrder(String tag) {
+		if (tag == null) return -1L;
+		String t = tag.trim().toLowerCase(Locale.ROOT);
+		if (!LLAMA_CPP_BUILD_TAG.matcher(t).matches()) return -1L;
+		try {
+			return Long.parseLong(t.substring(1));
+		} catch (Exception e) {
+			return -1L;
+		}
+	}
+
+	/**
+	 * 把一个 GitHub release 对象转换成前端使用的结构。
+	 */
+	private JsonObject mapReleaseForUi(JsonObject src, String proxy) {
+		JsonObject data = new JsonObject();
+		if (src.has("tag_name") && !src.get("tag_name").isJsonNull()) {
+			data.addProperty("tag_name", src.get("tag_name").getAsString());
+		}
+		if (src.has("name") && !src.get("name").isJsonNull()) {
+			data.addProperty("name", src.get("name").getAsString());
+		}
+		if (src.has("published_at") && !src.get("published_at").isJsonNull()) {
+			data.addProperty("published_at", src.get("published_at").getAsString());
+		}
+		if (src.has("created_at") && !src.get("created_at").isJsonNull()) {
+			data.addProperty("created_at", src.get("created_at").getAsString());
+		}
+		if (src.has("html_url") && !src.get("html_url").isJsonNull()) {
+			data.addProperty("html_url", src.get("html_url").getAsString());
+		}
+		if (src.has("prerelease") && !src.get("prerelease").isJsonNull()) {
+			data.addProperty("prerelease", src.get("prerelease").getAsBoolean());
+		}
+		long order = buildTagOrder(data.has("tag_name") ? data.get("tag_name").getAsString() : null);
+		data.addProperty("buildNumber", order);
+
+		JsonArray assets = new JsonArray();
+		if (src.has("assets") && src.get("assets").isJsonArray()) {
+			JsonArray srcAssets = src.getAsJsonArray("assets");
+			for (int i = 0; i < srcAssets.size(); i++) {
+				com.google.gson.JsonObject srcAsset = srcAssets.get(i).getAsJsonObject();
+				String assetName = "";
+				if (srcAsset.has("name") && !srcAsset.get("name").isJsonNull()) {
+					assetName = srcAsset.get("name").getAsString();
+				}
+				if (!isRelevantLlamaCppAsset(assetName)) {
+					continue;
+				}
+				JsonObject asset = new JsonObject();
+				asset.addProperty("name", assetName);
+				if (srcAsset.has("size") && !srcAsset.get("size").isJsonNull()) {
+					asset.addProperty("size", srcAsset.get("size").getAsLong());
+				}
+				if (srcAsset.has("download_count") && !srcAsset.get("download_count").isJsonNull()) {
+					asset.addProperty("download_count", srcAsset.get("download_count").getAsInt());
+				}
+				String bdu = "";
+				if (srcAsset.has("browser_download_url") && !srcAsset.get("browser_download_url").isJsonNull()) {
+					bdu = srcAsset.get("browser_download_url").getAsString();
+				}
+				if (proxy != null && !proxy.isEmpty() && !bdu.isEmpty()) {
+					String p = proxy;
+					if (!p.endsWith("/")) p += "/";
+					bdu = p + bdu.replaceFirst("^https?://", "");
+				}
+				asset.addProperty("browser_download_url", bdu);
+				assets.add(asset);
+			}
+		}
+		data.add("assets", assets);
+		return data;
+	}
+
+	/**
+	 * 从上游拉取最近若干条 release，只保留 llama.cpp 的构建版本（tag 形如 b11979）。
+	 *
+	 * <p>上游把 b* 构建全部标成 prerelease，并在同一仓库里夹着 v0.x.y 这类空壳 release
+	 * （只挂一个 nightly-tag.txt），因此不能再用 /releases/latest，必须翻列表再筛。</p>
+	 *
+	 * @param limit 需要返回的版本数
+	 * @param proxy 下载加速地址，可为 null
+	 */
+	private List<JsonObject> fetchLlamaCppBuildReleases(int limit, String proxy) throws IOException {
+		int want = Math.max(1, Math.min(limit, 30));
+		// 列表里混着 v* 空壳版本，多取一些再筛，保证够数
+		int perPage = Math.min(100, Math.max(want * 3, 30));
+		String apiUrl = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=" + perPage;
+
+		NettyHttpUtils.Response resp = NettyHttpUtils.request(apiUrl)
+				.header("User-Agent", UserAgentUtils.random())
+				.header("Accept", "application/vnd.github.v3+json")
+				.connectTimeout(15)
+				.readTimeout(30)
+				.execute();
+
+		String responseBody = resp.bodyAsString();
+		if (!resp.isSuccess() || responseBody == null || responseBody.isBlank()) {
+			String msg = (responseBody == null || responseBody.isBlank())
+					? ("GitHub API 错误: HTTP " + resp.statusCode()) : responseBody;
+			throw new IOException(msg);
+		}
+
+		JsonArray root = JsonUtil.fromJson(responseBody, JsonArray.class);
+		if (root == null) {
+			throw new IOException(I18N_GITHUB_API_PARSE_FAILED);
+		}
+
+		List<JsonObject> builds = new ArrayList<>();
+		for (int i = 0; i < root.size(); i++) {
+			if (!root.get(i).isJsonObject()) continue;
+			JsonObject release = root.get(i).getAsJsonObject();
+			if (release.has("draft") && !release.get("draft").isJsonNull() && release.get("draft").getAsBoolean()) {
+				continue;
+			}
+			String tag = release.has("tag_name") && !release.get("tag_name").isJsonNull()
+					? release.get("tag_name").getAsString() : null;
+			long order = buildTagOrder(tag);
+			if (order < 0) {
+				continue; // 跳过 v0.x.y 这类空壳 release
+			}
+			if (!release.has("assets") || !release.get("assets").isJsonArray()
+					|| release.getAsJsonArray("assets").size() == 0) {
+				continue; // 没挂任何附件的版本对下载页没有意义
+			}
+			builds.add(mapReleaseForUi(release, proxy));
+		}
+
+		// 按构建号倒序（上游列表本身已倒序，这里再保证一次）
+		builds.sort((a, b) -> Long.compare(
+				b.has("buildNumber") ? b.get("buildNumber").getAsLong() : -1L,
+				a.has("buildNumber") ? a.get("buildNumber").getAsLong() : -1L));
+
+		if (builds.size() > want) {
+			return new ArrayList<>(builds.subList(0, want));
+		}
+		return builds;
+	}
+
+	/**
+	 * 已安装的本地版本目录名 + 已安装的 cudart 目录名，前端用来标记「已安装」。
+	 */
+	private void attachLocalState(JsonObject data) {
+		JsonArray localBackendsArr = new JsonArray();
+		List<LlamaCppDataStruct> scanned = LlamaServer.scanLlamaCpp();
+		if (scanned != null) {
+			for (LlamaCppDataStruct s : scanned) {
+				if (s != null && s.getName() != null && !s.getName().isBlank()) {
+					localBackendsArr.add(s.getName());
+				}
+			}
+		}
+		data.add("localBackends", localBackendsArr);
+
+		JsonArray localCudartsArr = new JsonArray();
+		List<String> cudarts = LlamaServerManager.getInstance().scanCudartPackages();
+		if (cudarts != null) {
+			for (String c : cudarts) {
+				if (c != null && !c.isBlank()) {
+					localCudartsArr.add(c);
+				}
+			}
+		}
+		data.add("localCudarts", localCudartsArr);
+	}
+
+	/**
+	 * 获取最近 N 个 llama.cpp 构建版本（默认 10 个），用于下载页的版本选择。
+	 */
+	private void handleLlamaCppReleases(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+		this.assertRequestMethod(request.method() != HttpMethod.GET, I18N_METHOD_GET_ONLY);
+		try {
+			String proxy = this.resolveProxyParam(request);
+			Map<String, String> params = ParamTool.getQueryParam(request.uri());
+			int limit = 10;
+			String limitRaw = params.get("limit");
+			if (limitRaw != null && !limitRaw.trim().isEmpty()) {
+				try {
+					limit = Integer.parseInt(limitRaw.trim());
+				} catch (NumberFormatException ignore) {
+					limit = 10;
+				}
+			}
+
+			List<JsonObject> releases = this.fetchLlamaCppBuildReleases(limit, proxy);
+
+			JsonArray arr = new JsonArray();
+			for (JsonObject r : releases) {
+				arr.add(r);
+			}
+			JsonObject data = new JsonObject();
+			data.add("releases", arr);
+			if (!releases.isEmpty()) {
+				data.add("latest", releases.get(0));
+			}
+			this.attachLocalState(data);
+
+			Map<String, Object> result = new HashMap<>();
+			result.put("success", true);
+			result.put("data", data);
+			LlamaServer.sendJsonResponse(ctx, result);
+		} catch (IOException e) {
+			logger.info("获取 llama.cpp 版本列表失败", e);
+			Map<String, Object> err = new HashMap<>();
+			err.put("success", false);
+			err.put("error", I18N_RELEASE_INFO_FETCH_FAILED + ": " + e.getMessage());
+			LlamaServer.sendJsonResponse(ctx, err);
+		}
+	}
+
+	/**
+	 * 获取最新一个 llama.cpp 构建版本（保留旧接口，内部改为「列表 + 取第一个」）。
 	 * @param ctx
 	 * @param request
 	 * @throws RequestMethodException
@@ -665,112 +901,17 @@ public class LlamacppController implements BaseController {
 	private void handleLlamaCppReleaseLatest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
 		this.assertRequestMethod(request.method() != HttpMethod.GET, I18N_METHOD_GET_ONLY);
 		try {
-			Map<String, String> params = ParamTool.getQueryParam(request.uri());
-			String proxy = params.get("proxy");
-			if (proxy != null && !proxy.trim().isEmpty()) {
-				proxy = proxy.trim();
-			} else {
-				proxy = null;
-			}
-
-			String apiUrl = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
-			NettyHttpUtils.Response resp = NettyHttpUtils.request(apiUrl)
-					.header("User-Agent", UserAgentUtils.random())
-					.header("Accept", "application/vnd.github.v3+json")
-					.connectTimeout(15)
-					.readTimeout(30)
-					.execute();
-
-			String responseBody = resp.bodyAsString();
-
-			if (!resp.isSuccess() || responseBody == null) {
-				String msg = responseBody == null || responseBody.isBlank()
-						? ("GitHub API 错误: HTTP " + resp.statusCode()) : responseBody;
+			String proxy = this.resolveProxyParam(request);
+			List<JsonObject> releases = this.fetchLlamaCppBuildReleases(1, proxy);
+			if (releases.isEmpty()) {
 				Map<String, Object> err = new HashMap<>();
 				err.put("success", false);
-				err.put("error", I18N_RELEASE_INFO_FETCH_FAILED + ": " + msg);
+				err.put("error", I18N_RELEASE_INFO_FETCH_FAILED + ": 未找到任何 llama.cpp 构建版本");
 				LlamaServer.sendJsonResponse(ctx, err);
 				return;
 			}
-
-			JsonObject root = JsonUtil.fromJson(responseBody, JsonObject.class);
-			if (root == null) {
-				Map<String, Object> err = new HashMap<>();
-				err.put("success", false);
-				err.put("error", I18N_GITHUB_API_PARSE_FAILED);
-				LlamaServer.sendJsonResponse(ctx, err);
-				return;
-			}
-
-			JsonObject data = new JsonObject();
-			if (root.has("tag_name") && !root.get("tag_name").isJsonNull()) {
-				data.addProperty("tag_name", root.get("tag_name").getAsString());
-			}
-			if (root.has("published_at") && !root.get("published_at").isJsonNull()) {
-				data.addProperty("published_at", root.get("published_at").getAsString());
-			}
-			if (root.has("html_url") && !root.get("html_url").isJsonNull()) {
-				data.addProperty("html_url", root.get("html_url").getAsString());
-			}
-
-			JsonArray assets = new com.google.gson.JsonArray();
-			if (root.has("assets") && root.get("assets").isJsonArray()) {
-				com.google.gson.JsonArray srcAssets = root.getAsJsonArray("assets");
-				for (int i = 0; i < srcAssets.size(); i++) {
-					com.google.gson.JsonObject src = srcAssets.get(i).getAsJsonObject();
-					String assetName = "";
-					if (src.has("name") && !src.get("name").isJsonNull()) {
-						assetName = src.get("name").getAsString();
-					}
-					if (!isRelevantLlamaCppAsset(assetName)) {
-						continue;
-					}
-					com.google.gson.JsonObject asset = new JsonObject();
-					asset.addProperty("name", assetName);
-					if (src.has("size") && !src.get("size").isJsonNull()) {
-						asset.addProperty("size", src.get("size").getAsLong());
-					}
-					if (src.has("download_count") && !src.get("download_count").isJsonNull()) {
-						asset.addProperty("download_count", src.get("download_count").getAsInt());
-					}
-					String bdu = "";
-					if (src.has("browser_download_url") && !src.get("browser_download_url").isJsonNull()) {
-						bdu = src.get("browser_download_url").getAsString();
-					}
-					if (proxy != null && !proxy.isEmpty() && !bdu.isEmpty()) {
-						String p = proxy;
-						if (!p.endsWith("/")) p += "/";
-						bdu = p + bdu.replaceFirst("^https?://", "");
-					}
-					asset.addProperty("browser_download_url", bdu);
-					assets.add(asset);
-				}
-			}
-			data.add("assets", assets);
-
-			// Add locally available backend names so the frontend can mark assets as installed
-			JsonArray localBackendsArr = new JsonArray();
-			List<LlamaCppDataStruct> scanned = LlamaServer.scanLlamaCpp();
-			if (scanned != null) {
-				for (LlamaCppDataStruct s : scanned) {
-					if (s != null && s.getName() != null && !s.getName().isBlank()) {
-						localBackendsArr.add(s.getName());
-					}
-				}
-			}
-			data.add("localBackends", localBackendsArr);
-
-			// Add locally available cudart package names
-			JsonArray localCudartsArr = new JsonArray();
-			List<String> cudarts = LlamaServerManager.getInstance().scanCudartPackages();
-			if (cudarts != null) {
-				for (String c : cudarts) {
-					if (c != null && !c.isBlank()) {
-						localCudartsArr.add(c);
-					}
-				}
-			}
-			data.add("localCudarts", localCudartsArr);
+			JsonObject data = releases.get(0);
+			this.attachLocalState(data);
 
 			Map<String, Object> result = new HashMap<>();
 			result.put("success", true);
@@ -785,12 +926,7 @@ public class LlamacppController implements BaseController {
 		}
 	}
 
-	/**
-	 * 	分词器接口，纯代理转发到llamacpp子进程。
-	 * @param ctx
-	 * @param request
-	 * @throws RequestMethodException
-	 */
+
 	private void handleTokenizeRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
 		if (request.method() == HttpMethod.OPTIONS) {
 			LlamaServer.sendCorsResponse(ctx);

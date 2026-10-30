@@ -202,6 +202,11 @@ public class LlamaServer {
 				logger.error("关闭请求记录服务失败", e);
 			}
 			try {
+				org.mark.llamacpp.server.chathub.ChatProxyServer.getInstance().stop();
+			} catch (Exception e) {
+				logger.error("关闭聊天台失败", e);
+			}
+			try {
 				NettySharedGroups.shutdownAll();
 			} catch (Exception e) {
 				logger.error("关闭共享Netty线程组失败", e);
@@ -243,6 +248,13 @@ public class LlamaServer {
 			} catch (Exception e) {
 				logger.info("启动MCP服务失败: {}", e.getMessage());
 			}
+		}
+
+		// 聊天台：llama.cpp 自带 WebUI 挂在固定端口上，所有模型共用一个 origin（历史共享）
+		try {
+			org.mark.llamacpp.server.chathub.ChatProxyServer.getInstance().start();
+		} catch (Exception e) {
+			logger.info("启动聊天台失败: {}", e.getMessage());
 		}
 		
 		// 初始化一下记录服务

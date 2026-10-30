@@ -1,6 +1,7 @@
 package org.mark.llamacpp.server.service;
 
 import org.mark.llamacpp.gguf.GGUFModel;
+import org.mark.llamacpp.server.ConfigManager;
 import org.mark.llamacpp.server.LlamaServer;
 import org.mark.llamacpp.server.LlamaServerManager;
 import org.slf4j.Logger;
@@ -119,21 +120,20 @@ public class AutoLoadPolicyManager {
 		Map<String, Object> result = new HashMap<>();
 		String policy = manager.getAutoLoadPolicy(modelId);
 		Map<String, Object> policiesMap = new HashMap<>();
-		policiesMap.put(modelId, policy != null ? policy : "deny");
+		policiesMap.put(modelId, policy != null ? policy : ConfigManager.DEFAULT_AUTO_LOAD_POLICY);
 		result.put("policies", policiesMap);
 
 		String unloadPolicy = manager.getAutoUnloadPolicy(modelId);
 		Map<String, Object> unloadPoliciesMap = new HashMap<>();
-		unloadPoliciesMap.put(modelId, unloadPolicy != null ? unloadPolicy : "deny");
+		unloadPoliciesMap.put(modelId, unloadPolicy != null ? unloadPolicy : ConfigManager.DEFAULT_AUTO_UNLOAD_POLICY);
 		result.put("autoUnload", unloadPoliciesMap);
 
 		Map<String, Object> modelsMap = new HashMap<>();
 		Map<String, Object> modelInfo = new HashMap<>();
 		modelInfo.put("modelId", modelId);
 		Long unloadTimeout = manager.getAutoUnloadTimeoutMs(modelId);
-		if (unloadTimeout != null) {
-			modelInfo.put("autoUnloadTimeoutMs", unloadTimeout);
-		}
+		modelInfo.put("autoUnloadTimeoutMs",
+				unloadTimeout != null ? unloadTimeout : ConfigManager.DEFAULT_AUTO_UNLOAD_TIMEOUT_MS);
 		modelsMap.put(modelId, modelInfo);
 		result.put("models", modelsMap);
 
@@ -142,6 +142,9 @@ public class AutoLoadPolicyManager {
 
 	/**
 	 * 获取所有模型的自动加载策略（批量读取，只读一次配置文件）
+	 *
+	 * <p>未在 launch_config.json 里出现的模型（新扫描到的模型）也要返回默认值：
+	 * 允许自动加载、允许自动卸载、空闲 5 分钟卸载。否则前端会把这些模型显示成未勾选。</p>
 	 */
 	public Map<String, Object> getAllPolicies() {
 		Map<String, Object> result = new HashMap<>();
@@ -151,23 +154,6 @@ public class AutoLoadPolicyManager {
 		Map<String, String> allUnloadPolicies = manager.getAllAutoUnloadPolicies();
 		Map<String, Long> allUnloadTimeouts = manager.getAllAutoUnloadTimeouts();
 
-		Map<String, Object> modelsMap = new HashMap<>();
-		for (GGUFModel model : models) {
-			String modelId = model.getModelId();
-			String policy = allPolicies.get(modelId);
-			String unloadPolicy = allUnloadPolicies.get(modelId);
-			Long unloadTimeout = allUnloadTimeouts.get(modelId);
-			Map<String, Object> modelInfo = new HashMap<>();
-			modelInfo.put("modelId", modelId);
-			modelInfo.put("modelName", model.getName());
-			modelInfo.put("policy", policy != null ? policy : "deny");
-			modelInfo.put("autoUnload", unloadPolicy != null ? unloadPolicy : "deny");
-			if (unloadTimeout != null) {
-				modelInfo.put("autoUnloadTimeoutMs", unloadTimeout);
-			}
-			modelsMap.put(modelId, modelInfo);
-		}
-
 		Map<String, Object> policiesMap = new HashMap<>();
 		for (Map.Entry<String, String> entry : allPolicies.entrySet()) {
 			policiesMap.put(entry.getKey(), entry.getValue());
@@ -176,6 +162,24 @@ public class AutoLoadPolicyManager {
 		Map<String, Object> unloadPoliciesMap = new HashMap<>();
 		for (Map.Entry<String, String> entry : allUnloadPolicies.entrySet()) {
 			unloadPoliciesMap.put(entry.getKey(), entry.getValue());
+		}
+
+		Map<String, Object> modelsMap = new HashMap<>();
+		for (GGUFModel model : models) {
+			String modelId = model.getModelId();
+			String policy = allPolicies.getOrDefault(modelId, ConfigManager.DEFAULT_AUTO_LOAD_POLICY);
+			String unloadPolicy = allUnloadPolicies.getOrDefault(modelId, ConfigManager.DEFAULT_AUTO_UNLOAD_POLICY);
+			Long unloadTimeout = allUnloadTimeouts.getOrDefault(modelId, ConfigManager.DEFAULT_AUTO_UNLOAD_TIMEOUT_MS);
+			Map<String, Object> modelInfo = new HashMap<>();
+			modelInfo.put("modelId", modelId);
+			modelInfo.put("modelName", model.getName());
+			modelInfo.put("policy", policy);
+			modelInfo.put("autoUnload", unloadPolicy);
+			modelInfo.put("autoUnloadTimeoutMs", unloadTimeout);
+			modelsMap.put(modelId, modelInfo);
+			// 补齐到批量映射里，保证「新模型」也带着默认勾选状态
+			policiesMap.put(modelId, policy);
+			unloadPoliciesMap.put(modelId, unloadPolicy);
 		}
 
 		result.put("policies", policiesMap);
