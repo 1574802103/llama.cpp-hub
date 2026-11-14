@@ -333,3 +333,36 @@ hub 的 `/v1`、聊天台、模型列表本来就都由 hub 自己代理（内�
 本来就不该带浏览器上下文；模型判定用的 Referer 在过滤前已经读过，不受影响。
 
 **验证**：同一请求带 Origin 修复前 403、修复后 200；页面正常渲染，`/v1/chat/completions` 经代理能出词。
+
+---
+
+## 2026-11-14 · 参数表全量对齐 b12375
+
+**做法**：把 `llama-server --help`（266 个选项）按固定列宽解析成结构化清单，
+和 `server-params.json` 归一化对碰（`--no-X` 与 `--X` 视为同一开关），再逐项对着真实二进制验证。
+
+**结果**
+- 表格条目 183 → **197**，14 个分组；表里已无「二进制不认识」的死项（之前担心的
+  `--no-*` 变体全部仍被上游接受；真正被改名的是 llama-bench 的 `--pg`）。
+- 新增 14 项：`--moe-cache-cpu-share`、`--no-mmproj-auto`、`--media-allow-private-urls`、
+  `--tts-lang`、`--tts-voice`、`--spm-infill`、`--perf`、`--offline`、`--special`、
+  `--lookup-cache-static`、`--lookup-cache-dynamic`、`--ple`、`--api-key`、`--spec-default`。
+  全部补了中英文名称 + 以自身 flag 开头的说明。
+- 默认值比对 27 处差异，逐个看下来只有 8 处「空值 vs 描述性默认」（`same as --threads`、
+  `read from model` 这类），没有语义错误。
+- 未进表的 69 个上游选项分三类：hub 自己接管（`--model/--host/--port/--alias/--device/--metrics`）、
+  其它运行模式（router 的 `--models-*`、HF/`--docker-repo` 下载预设、`--fim-*`/`--gpt-oss-*`）、
+  一次性/调试（`--help`/`--version`/`--cache-list`/`--log-*`/`--verbose`）。已废弃的
+  `--draft`、`--spec-ngram-size-*` 也不收。
+
+**llama-bench 表**（benchmark-params.json）
+- 37 → **38** 项；`--pg` 在新版已改成只能写 `-pg <pp,tg>`，旧写法会被拒（`invalid parameter`），已改。
+- 补 `--lazy-mode`、`--repack`、`--offline`；补上缺失的 `param.benchmark.progress.name` 与
+  `tensor_split.desc` 两处 i18n 空洞。
+
+**验证**
+- `validate_tables.py`：server 197 项 / bench 38 项，i18n 全齐、说明前缀正确、无死项。
+- 新参数逐个过真机：`llama-server --<flag> <value> --help` 全部 OK。
+- 真实加载：Gemma4-12B 带上 `--media-allow-private-urls --perf --moe-cache-cpu-share 0.1 --offline`
+  正常起飞并出词。
+- 页面：`#paramForm` 渲染 197 项、14 组，新参数 tooltip 显示正常。
