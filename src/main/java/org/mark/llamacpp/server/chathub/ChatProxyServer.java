@@ -569,7 +569,13 @@ public final class ChatProxyServer {
 					|| HttpHeaderNames.CONNECTION.contentEqualsIgnoreCase(name)
 					|| HttpHeaderNames.CONTENT_LENGTH.contentEqualsIgnoreCase(name)
 					|| HttpHeaderNames.TRANSFER_ENCODING.contentEqualsIgnoreCase(name)
-					|| HttpHeaderNames.ACCEPT_ENCODING.contentEqualsIgnoreCase(name)) {
+					|| HttpHeaderNames.ACCEPT_ENCODING.contentEqualsIgnoreCase(name)
+					// 聊天台与实例不同端口，把浏览器的 Origin/Referer 原样透传过去，
+					// 新版 llama-server（开了 tools/MCP 时）会按 --cors-origins 判成跨域直接 403：
+					//   Cross-origin request not allowed (see --cors-origins)
+					// 转发的这一跳是服务端到服务端，本来就没有浏览器上下文，去掉即可。
+					|| HttpHeaderNames.ORIGIN.contentEqualsIgnoreCase(name)
+					|| HttpHeaderNames.REFERER.contentEqualsIgnoreCase(name)) {
 				continue;
 			}
 			headers.computeIfAbsent(name, key -> new ArrayList<>()).add(entry.getValue());
