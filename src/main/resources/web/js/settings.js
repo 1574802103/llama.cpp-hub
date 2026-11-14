@@ -589,6 +589,81 @@
         }
     }
 
+    /**
+     * 保存监听地址并重启 hub：改监听地址必须重新绑定端口，所以保存后直接重启进程，
+     * 页面轮询 /api/sys/version，等服务回来后自动刷新。
+     */
+    async function saveListenAddressAndRestart() {
+        const input = byId('listenAddressInput');
+        const btn = byId('saveListenAddressRestartBtn');
+        const addr = input ? input.value.trim() : '';
+        if (!addr) {
+            toast(t('toast.error', '错误'), '请填写监听地址', 'error');
+            return;
+        }
+        if (btn) btn.disabled = true;
+        try {
+            const resp = await fetch('/api/sys/setting', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ listenAddress: addr })
+            });
+            const data = await resp.json();
+            if (!data || !data.success) {
+                toast(t('toast.error', '错误'), (data && data.error) ? data.error : t('common.save_failed', '保存失败'), 'error');
+                if (btn) btn.disabled = false;
+                return;
+            }
+            toast(t('toast.success', '成功'),
+                t('page.settings.server.listen_address.restarting', '正在重启 hub，页面会在服务恢复后自动刷新'), 'success');
+            const base = listenTargetBase(addr);
+            await fetch('/api/sys/restart', { method: 'POST' });
+            waitForHubRestart(Date.now(), base);
+        } catch (e) {
+            toast(t('toast.error', '错误'), t('common.network_request_failed', '网络请求失败'), 'error');
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    /**
+     * 换了监听地址之后，页面原来的 origin 可能已经访问不到了（比如 127.0.0.1 → 192.168.31.30），
+     * 所以轮询和跳转都要用「新地址 + 当前端口」拼出来的 base。
+     */
+    function listenTargetBase(addr) {
+        var host = (addr === '0.0.0.0' || addr === '*') ? location.hostname : addr;
+        var port = location.port ? (':' + location.port) : '';
+        return location.protocol + '//' + host + port;
+    }
+
+    /** 轮询版本接口，服务回来后刷新页面；超时给提示。 */
+    function waitForHubRestart(startedAt, base) {
+        var target = base || location.origin;
+        setTimeout(async function poll() {
+            try {
+                const r = await fetch(target + '/api/sys/version', { cache: 'no-store' });
+                if (r.ok) {
+                    const j = await r.json();
+                    if (j && j.success) {
+                        if (target === location.origin) {
+                            location.reload();
+                        } else {
+                            location.href = target + location.pathname + location.search + location.hash;
+                        }
+                        return;
+                    }
+                }
+            } catch (e) { /* 服务还没起来 */ }
+            if (Date.now() - startedAt > 60000) {
+                toast(t('toast.error', '错误'),
+                    t('page.settings.server.listen_address.restart_failed', '重启超时，请手动检查 hub 是否在运行'), 'error');
+                const btn = byId('saveListenAddressRestartBtn');
+                if (btn) btn.disabled = false;
+                return;
+            }
+            setTimeout(poll, 1000);
+        }, 2500);
+    }
+
     async function saveHttpOnlyPort() {
         const toggle = byId('toggleHttpOnlyEnabled');
         const portInput = byId('httpOnlyPortInput');
@@ -2111,6 +2186,8 @@
         // Listen address (127.0.0.1 = loopback only, 0.0.0.0 = all interfaces)
         const saveListenAddressBtn = byId('saveListenAddressBtn');
         if (saveListenAddressBtn) saveListenAddressBtn.addEventListener('click', saveListenAddress);
+        const saveListenAddressRestartBtn = byId('saveListenAddressRestartBtn');
+        if (saveListenAddressRestartBtn) saveListenAddressRestartBtn.addEventListener('click', saveListenAddressAndRestart);
 
         // HTTP-only dedicated port (plain HTTP, for clients that reject self-signed certs)
         const saveHttpOnlyBtn = byId('saveHttpOnlyPortsBtn');

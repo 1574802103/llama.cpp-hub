@@ -212,6 +212,10 @@ public class LlamaServer {
 				logger.error("关闭共享Netty线程组失败", e);
 			}
 			logger.info("清理完成，进程退出");
+			if (restartPending) {
+				logger.info("[重启] 端口与模型已释放，重新拉起 hub 进程");
+				relaunchProcess();
+			}
 			
             // 以前不知道log4j也要执行shutdown
             try {
@@ -447,6 +451,9 @@ public class LlamaServer {
 	 * "0.0.0.0" 表示监听所有网卡，允许局域网内客户端访问。
 	 */
 	private static volatile String listenAddress = DEFAULT_LISTEN_ADDRESS;
+
+	/** 置为 true 时，重启流程会在 shutdown hook 清理完成后重新拉起进程。 */
+	private static volatile boolean restartPending = false;
 
 	private static final Object RESTART_LOCK = new Object();
 
@@ -805,6 +812,49 @@ public class LlamaServer {
 
 	public static String getListenAddress() {
 		return listenAddress;
+	}
+
+	/**
+	 * 请求重启：标记后由 shutdown hook 在资源全部释放（端口已关闭、模型已停止）之后拉起新进程。
+	 * 调用方负责随后 System.exit(0)。
+	 */
+	public static void requestRestart() {
+		restartPending = true;
+	}
+
+	/**
+	 * 重新拉起 hub 进程。
+	 *
+	 * Windows 上 ProcessHandle 拿不到原始命令行（arguments()/commandLine() 都是空），
+	 * 但可执行文件、JVM 参数（RuntimeMXBean）、classpath、工作目录在运行期都拿得到，
+	 * 用这些重组命令行即可，效果等价于用户重新双击 run.bat。
+	 */
+	private static void relaunchProcess() {
+		try {
+			Thread.sleep(600); // 给端口释放留一点时间
+		} catch (InterruptedException ignored) {
+			Thread.currentThread().interrupt();
+		}
+		try {
+			String exe = ProcessHandle.current().info().command().orElse(null);
+			if (exe == null || exe.isEmpty()) {
+				exe = System.getProperty("java.home") + File.separator + "bin" + File.separator + "javaw.exe";
+			}
+			List<String> command = new ArrayList<>();
+			command.add(exe);
+			command.addAll(ManagementFactory.getRuntimeMXBean().getInputArguments());
+			command.add("-classpath");
+			command.add(System.getProperty("java.class.path"));
+			command.add("org.mark.llamacpp.server.LlamaServer");
+			ProcessBuilder pb = new ProcessBuilder(command);
+			pb.directory(new File(System.getProperty("user.dir")));
+			pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+			pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+			Process child = pb.start();
+			System.out.println("[重启] 已拉起新进程 PID=" + child.pid() + " 命令=" + String.join(" ", command));
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 	}
 
 	/**

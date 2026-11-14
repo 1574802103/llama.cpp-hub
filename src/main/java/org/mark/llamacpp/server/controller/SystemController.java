@@ -177,6 +177,11 @@ public class SystemController implements BaseController {
 			this.handlePidRequest(ctx, request);
 			return true;
 		}
+		// 重启 hub（设置页「保存并重启」用）
+		if (uri.equals("/api/sys/restart")) {
+			this.handleRestartRequest(ctx, request);
+			return true;
+		}
 //		// 获取GPU服务信息（初始化快照）
 //		if (uri.equals("/api/sys/gpu/info")) {
 //			this.handleGpuInfoRequest(ctx, request);
@@ -1375,6 +1380,36 @@ if (downloadDirectory != null && !downloadDirectory.isEmpty()) {
 			logger.info("应用更新包时发生错误", e);
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.error(I18N_APPLY_FAILED));
 		}
+	}
+
+	/**
+	 * 重启 hub：先回响应，再退出进程，由 shutdown hook 清理完资源后拉起新进程。
+	 * 前端会轮询 /api/sys/version 直到服务重新可用。
+	 */
+	private void handleRestartRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+		if (request.method() == HttpMethod.OPTIONS) {
+			LlamaServer.sendCorsResponse(ctx);
+			return;
+		}
+		this.assertRequestMethod(request.method() != HttpMethod.POST, I18N_METHOD_POST_ONLY);
+		try {
+			Map<String, Object> data = new HashMap<>();
+			data.put("restarting", true);
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
+		} catch (Exception e) {
+			logger.info("重启响应发送失败", e);
+		}
+		LlamaServer.requestRestart();
+		Thread t = new Thread(() -> {
+			try {
+				Thread.sleep(500); // 让响应先发出去
+			} catch (InterruptedException ignored) {
+				Thread.currentThread().interrupt();
+			}
+			System.exit(0);
+		}, "hub-restart");
+		t.setDaemon(false);
+		t.start();
 	}
 
 	/**
