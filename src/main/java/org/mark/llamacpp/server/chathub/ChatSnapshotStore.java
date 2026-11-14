@@ -58,6 +58,10 @@ public final class ChatSnapshotStore {
 				return emptySnapshot();
 			}
 			normalize(stored);
+			// 老版本只记墓碑不删数据，文件里会残留"已删除"的会话；读的时候顺手治愈一次
+			if (purgeTombstoned(stored)) {
+				writeGzip(dbFile(), stored);
+			}
 			return stored;
 		}
 	}
@@ -76,6 +80,8 @@ public final class ChatSnapshotStore {
 			mergeRows(stored, incoming, "conversations", "lastModified");
 			mergeRows(stored, incoming, "messages", "timestamp");
 			mergeTombs(stored, incoming);
+			// 墓碑必须真的删行：否则 GET 又把删掉的会话发回浏览器，表现为"删了还在、重启又回来"
+			purgeTombstoned(stored);
 
 			stored.addProperty("updatedAt", System.currentTimeMillis());
 			writeGzip(dbFile(), stored);
@@ -249,6 +255,86 @@ public final class ChatSnapshotStore {
 			}
 		}
 		return 0L;
+	}
+
+	/**
+	 * 按墓碑把对应行从快照里删掉：会话本身、以及属于该会话的消息。
+	 * 返回是否真的删了东西（调用方据此决定要不要落盘）。
+	 */
+	private static boolean purgeTombstoned(JsonObject snapshot) {
+		if (snapshot == null || !snapshot.has("tombs") || !snapshot.get("tombs").isJsonObject()) {
+			return false;
+		}
+		JsonObject tombs = snapshot.getAsJsonObject("tombs");
+		Set<String> convTombs = idsOf(tombs, "conversations");
+		Set<String> msgTombs = idsOf(tombs, "messages");
+		if (convTombs.isEmpty() && msgTombs.isEmpty()) {
+			return false;
+		}
+		boolean changed = false;
+
+		JsonArray convs = snapshot.getAsJsonArray("conversations");
+		if (convs != null && !convTombs.isEmpty()) {
+			JsonArray kept = new JsonArray();
+			for (JsonElement element : convs) {
+				String id = stringField(element, "id");
+				if (id != null && convTombs.contains(id)) {
+					changed = true;
+					continue;
+				}
+				kept.add(element);
+			}
+			if (changed) {
+				snapshot.add("conversations", kept);
+			}
+		}
+
+		JsonArray msgs = snapshot.getAsJsonArray("messages");
+		if (msgs != null) {
+			JsonArray kept = new JsonArray();
+			boolean msgChanged = false;
+			for (JsonElement element : msgs) {
+				String id = stringField(element, "id");
+				String convId = stringField(element, "convId");
+				if ((id != null && msgTombs.contains(id)) || (convId != null && convTombs.contains(convId))) {
+					msgChanged = true;
+					continue;
+				}
+				kept.add(element);
+			}
+			if (msgChanged) {
+				snapshot.add("messages", kept);
+				changed = true;
+			}
+		}
+		return changed;
+	}
+
+	private static Set<String> idsOf(JsonObject tombs, String key) {
+		Set<String> ids = new LinkedHashSet<>();
+		if (tombs != null && tombs.has(key) && tombs.get(key).isJsonArray()) {
+			for (JsonElement element : tombs.getAsJsonArray(key)) {
+				if (element.isJsonPrimitive()) {
+					ids.add(element.getAsString());
+				}
+			}
+		}
+		return ids;
+	}
+
+	private static String stringField(JsonElement element, String field) {
+		if (element == null || !element.isJsonObject()) {
+			return null;
+		}
+		JsonObject row = element.getAsJsonObject();
+		if (!row.has(field) || !row.get(field).isJsonPrimitive()) {
+			return null;
+		}
+		try {
+			return row.get(field).getAsString();
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	private static void mergeTombs(JsonObject stored, JsonObject incoming) {

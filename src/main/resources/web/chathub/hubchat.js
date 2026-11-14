@@ -25,6 +25,7 @@
   var db = null;
   var lastPushSignature = '';
   var knownConversations = null;
+  var knownMessages = null;
   var models = [];
 
   function sleep(ms) {
@@ -135,8 +136,10 @@
       }
     });
 
+    var convTombSet = new Set(tombs.conversations || []);
+    var msgTombSet = new Set(tombs.messages || []);
     incomingConversations.forEach(function (row) {
-      if (!row || !row.id) { return; }
+      if (!row || !row.id || convTombSet.has(row.id)) { return; }
       var local = localConversations.get(row.id);
       if (!local || Number(row.lastModified || 0) > Number(local.lastModified || 0)) {
         convStore.put(row);
@@ -144,7 +147,7 @@
       }
     });
     incomingMessages.forEach(function (row) {
-      if (!row || !row.id) { return; }
+      if (!row || !row.id || msgTombSet.has(row.id) || convTombSet.has(row.convId)) { return; }
       var local = localMessages.get(row.id);
       if (!local || Number(row.timestamp || 0) > Number(local.timestamp || 0)) {
         msgStore.put(row);
@@ -206,6 +209,14 @@
       });
     }
     knownConversations = ids;
+
+    var msgIds = new Set(payload.messages.map(function (row) { return row.id; }));
+    if (knownMessages) {
+      knownMessages.forEach(function (id) {
+        if (!msgIds.has(id)) { tombstones.messages.push(id); }
+      });
+    }
+    knownMessages = msgIds;
 
     try {
       await fetch(API + '/snapshot?m=' + encodeURIComponent(MODEL), {
@@ -463,8 +474,10 @@
       }
     }
 
-    knownConversations = new Set((await dumpDb()).conversations.map(function (row) { return row.id; }));
-    lastPushSignature = signatureOf(await dumpDb());
+    var baseline = await dumpDb();
+    knownConversations = new Set(baseline.conversations.map(function (row) { return row.id; }));
+    knownMessages = new Set(baseline.messages.map(function (row) { return row.id; }));
+    lastPushSignature = signatureOf(baseline);
 
     buildSwitcher();
     setInterval(function () { pushSnapshot('tick'); }, 5000);

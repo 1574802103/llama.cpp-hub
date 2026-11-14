@@ -366,3 +366,27 @@ hub 的 `/v1`、聊天台、模型列表本来就都由 hub 自己代理（内�
 - 真实加载：Gemma4-12B 带上 `--media-allow-private-urls --perf --moe-cache-cpu-share 0.1 --offline`
   正常起飞并出词。
 - 页面：`#paramForm` 渲染 197 项、14 组，新参数 tooltip 显示正常。
+
+---
+
+## 2026-11-14 · 修「删除的会话还在、重启又回来」
+
+**现象**：把聊天记录全删了，左侧 Recent conversations 还挂着旧的；重启 hub 后再打开，删掉的又回来。
+
+**根因**：墓碑（tombstone）只记了 id，**从来没真的删行**。
+`ChatSnapshotStore.merge()` 的顺序是「合并 rows → 记墓碑」，墓碑只往 `tombs` 数组里塞 id，
+`conversations` / `messages` 里的数据原样保留；`GET /__hubchat/snapshot` 于是把这些「已删除」的行又发回浏览器，
+`hubchat.js` 的 `applySnapshot` 照着灌回 IndexedDB —— 看起来就是删不掉。
+
+实测他本人的快照：39 个会话里有 **29 个已经在墓碑里**，却还都在会话列表里。
+
+**修复**
+- 服务端新增 `purgeTombstoned()`：按墓碑删会话行、以及 `convId` 命中墓碑的消息行；
+  `merge()` 落盘前调用，`load()` 读的时候也调用一次（顺手治愈历史脏数据，并写回磁盘）。
+- `mergeRows` 之后必然 purge，所以旧客户端把已删除的会话再推回来也会被墓碑挡掉。
+- 前端 `hubchat.js`：补上消息墓碑（原来 `tombs.messages` 永远是空的）、`knownMessages` 基线；
+  `applySnapshot` 灌回时跳过墓碑 id 以及已删会话下的消息。
+
+**验证**
+- 双会话 A/B：删 B 并带墓碑后，GET 只剩 A、B 的消息也没了；再把 B 推回来，墓碑照样挡住。
+- 拿他的真实快照跑：GET 一次后 39 → 10 个会话、138 → 31 条消息，磁盘文件同步重写。
