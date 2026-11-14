@@ -265,3 +265,39 @@ llama-server 不提供 UI。修法：`LlamaServerManager.stripWebUiDisableFlags`
 **发布流程**
 - `.github/workflows/build-and-release.yml` 去掉 `push: tags` 触发，只留 `workflow_dispatch`：
   发布包在本地用 javac + 指定 llama.cpp 版本打包后手动上传，避免 CI 产出与本地不一致的 Release。
+
+---
+
+## 2026-11-14 · 修复 b12375 起「所有模型都加载不出来」
+
+**现象**：升级到 llama.cpp **b12375**（CUDA 13.5）后，点加载模型，实例 0.5 秒内退出，
+日志是 `模型进程在加载期间退出 (exitCode=1)`，界面上就是「模型用不了了」。
+
+**根因**：上游在 b12xxx 加了一条安全护栏——只要开了命令行工具 / MCP 代理（`--ui-mcp-proxy`），
+绑定的又不是回环地址、同时没设 `--api-key`，`llama-server` 直接 `exit(1)`：
+
+```
+E srv server_setup: security: server tools, MCP servers or MCP proxy are enabled on a non-loopback address without an API key
+E srv server_setup: set --api-key, bind to 127.0.0.1, or pass --allow-unauthenticated-tools on a trusted network
+```
+
+而 hub 在 `LlamaServerManager` 的两条命令拼装路径里都硬编码了 `--host 0.0.0.0`
+（`buildCommandStr` 与 `buildCommandStrFromCmd`），于是每个模型都必然触发这条护栏。
+
+**修复**：新增常量 `INSTANCE_HOST = "127.0.0.1"`，两处 `--host` 都改用它。
+hub 的 `/v1`、聊天台、模型列表本来就都由 hub 自己代理（内部全部走 `127.0.0.1`），
+实例端口不需要暴露到局域网；这样既绕开护栏，也顺手把实例从局域网收回来。
+如果确实要在局域网直连某个实例，用 `--host` 写在模型的启动参数里即可（代码会尊重用户显式传入的值）。
+
+**顺带发现（性能）**：同一张卡、同一个模型，b12375 比 b12032 吃显存更多、掉速更早：
+
+| ctx | b12032 | b12375 |
+|---|---|---|
+| 57344 | 32.9 | 33.2 |
+| 61440 | — | 33.3 |
+| 65536 | 35.7 | 25.0 |
+| 69632 | 33.3 | 14.9 |
+| 70000 | — | ~3.5（不可用） |
+
+所以在 b12375 上，27B/16GB 的机器上下文建议压到 **61440 以内**；要更大的上下文得换更小的量化，
+或装回旧版 llama.cpp。

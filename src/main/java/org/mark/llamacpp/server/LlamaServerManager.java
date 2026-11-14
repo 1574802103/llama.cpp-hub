@@ -81,6 +81,17 @@ public class LlamaServerManager {
 	 * 	
 	 */
 	private static final Gson gson = JsonUtil.gson();
+
+	/**
+	 * 实例进程的监听地址。
+	 *
+	 * llama.cpp 从 b12xxx 起加了安全护栏：只要打开了命令行工具 / MCP 代理（--ui-mcp-proxy），
+	 * 绑定的又不是回环地址、同时没设 --api-key，llama-server 会立刻 exit(1)：
+	 *   security: server tools, MCP servers or MCP proxy are enabled on a non-loopback address without an API key
+	 * hub 的 /v1、聊天台、模型列表都由 hub 自己代理，实例端口不需要暴露到局域网，
+	 * 所以实例统一绑回环：既绕开这条护栏，也顺带收紧权限。
+	 */
+	private static final String INSTANCE_HOST = "127.0.0.1";
 	
 /**
  	 * 	这是锁。
@@ -2604,8 +2615,8 @@ if (loadSuccess.get()) {
 		sb.append(" --alias ").append(ParamTool.quoteIfNeeded(alias));
 
 		sb.append(" --timeout 36000");
-		// 允许任意IP地址访问
-		sb.append(" --host 0.0.0.0");
+		// 绑回环：hub 负责对外，实例不需要暴露到局域网（见 INSTANCE_HOST 的说明）
+		sb.append(" --host ").append(INSTANCE_HOST);
 		// 输出详细日志 一些分支不兼容这玩意，先注释掉吧，后续改为可选参数。
 		//sb.append(" -lv 4");
 
@@ -2688,7 +2699,7 @@ if (loadSuccess.get()) {
 		}
 
 		if (!hasFlagToken(userArgs, "--host")) {
-			sb.append(" --host 0.0.0.0");
+			sb.append(" --host ").append(INSTANCE_HOST);
 		}
 		if (!hasFlagToken(userArgs, "--timeout")) {
 			sb.append(" --timeout 36000");
