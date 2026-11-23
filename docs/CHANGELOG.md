@@ -462,3 +462,23 @@ llama-server，它回 **304 Not Modified**，代理也就无法注入，浏览�
 
 验证：带旧 ETag 复访返回 200（不再 304）、戳为请求的模型；无头浏览器实测
 `window.__HUB_MODEL` 与左下角文本都等于 `Gemma4-12B-IT-QAT-Q4_K_XL`。
+
+---
+
+## 2026-11-23 · 修模型列表 In/Out 平均速度不更新
+
+**现象**：模型列表里每个模型的 `In xxx t/s` / `Out xxx t/s` 一直不动。
+
+**根因**：这些数字来自 `cache/record/<模型>.requests.bin`，只有走 hub 自己那套 OpenAI/Anthropic 接口的请求
+才会写（`ModelRequestTracker.createRequest → updateTiming → removeRequest → recordRequest`）。
+10-30 把聊天台换成 llama.cpp 自带 WebUI 之后，聊天流量由 `ChatProxyServer` 直接转发给模型实例，
+从不登记 timing，于是记录停在 10-30 09:43 那批 EasyChat 数据上。
+
+**修复**：`ChatProxyServer` 转发生成类请求时，一边往客户端写一边留最后 32KB，
+结束时从中取出 `timings` 挂到 `ModelRequestTracker.updateTiming(requestId, timing)`，
+`removeRequest` 落盘时就带上 prompt/predicted 速度。流式和非流式都能取到
+（llama-server 流式响应最后一条 chunk 里就带 `timings`）。
+
+**验证**：测试实例上先发一条非流式、再发一条流式（都走 8109 聊天台），
+`cache/record/Gemma4-12B-IT-QAT-Q4_K_XL.requests.bin` 立即写入，
+`/api/models/record/speed` 返回 `averagePromptPerSecond=205.0`、`averagePredictedPerSecond=136.1`。

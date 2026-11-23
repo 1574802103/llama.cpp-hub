@@ -2,6 +2,7 @@ package org.mark.llamacpp.server.chathub;
 
 import java.io.ByteArrayInputStream;
 import org.mark.llamacpp.server.service.ModelRequestTracker;
+import org.mark.llamacpp.server.struct.Timing;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -676,6 +677,11 @@ public final class ChatProxyServer {
 				}
 				ctx.writeAndFlush(out);
 
+				// 生成类请求要统计速度：一边转发一边留最后 32KB，结束时交给 LlamaRecordService 记 timings/usage，
+				// 否则经聊天台产生的请求不会进模型列表的 In/Out 平均速度。
+				java.io.ByteArrayOutputStream tailBuffer = (generation && !(gzip && clientGzip))
+						? new java.io.ByteArrayOutputStream(8192)
+						: null;
 				try (InputStream input = response.body()) {
 					InputStream source = (gzip && !clientGzip) ? new GZIPInputStream(input) : input;
 					byte[] buffer = new byte[16 * 1024];
@@ -690,7 +696,27 @@ public final class ChatProxyServer {
 						if (!ctx.channel().isWritable()) {
 							Thread.sleep(5);
 						}
+						if (tailBuffer != null) {
+							tailBuffer.write(buffer, 0, read);
+							if (tailBuffer.size() > 32768) {
+								byte[] all = tailBuffer.toByteArray();
+								tailBuffer.reset();
+								tailBuffer.write(all, all.length - 32768, 32768);
+							}
+						}
 						ctx.writeAndFlush(new DefaultHttpContent(Unpooled.copiedBuffer(buffer, 0, read)));
+					}
+				} finally {
+					// 把响应里的 timings 挂到这次请求上；removeRequest 落盘时就会带上速度
+					if (tailBuffer != null && tailBuffer.size() > 0 && trackedRequest != null) {
+						try {
+							Timing timing = extractTiming(tailBuffer.toString("UTF-8"));
+							if (timing != null) {
+								ModelRequestTracker.getInstance().updateTiming(trackedRequest, timing);
+							}
+						} catch (Exception recordError) {
+							logger.debug("[聊天台] 记录速度失败: {}", recordError.getMessage());
+						}
 					}
 				}
 				ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
@@ -718,6 +744,40 @@ public final class ChatProxyServer {
 	private boolean isDocumentPath(String uri) {
 		String path = new QueryStringDecoder(uri).path();
 		return path.equals("/") || path.endsWith(".html");
+	}
+
+	/**
+	 * 从响应尾部提取最后一个 timings 对象（非流式在 JSON 末尾，流式在最后一条 chunk 里）。
+	 */
+	private Timing extractTiming(String tail) {
+		if (tail == null || tail.isEmpty()) {
+			return null;
+		}
+		int key = tail.lastIndexOf("\"timings\":");
+		if (key < 0) {
+			return null;
+		}
+		int start = tail.indexOf('{', key);
+		if (start < 0) {
+			return null;
+		}
+		int depth = 0;
+		for (int i = start; i < tail.length(); i++) {
+			char c = tail.charAt(i);
+			if (c == '{') {
+				depth++;
+			} else if (c == '}') {
+				depth--;
+				if (depth == 0) {
+					try {
+						return GSON.fromJson(tail.substring(start, i + 1), Timing.class);
+					} catch (Exception e) {
+						return null;
+					}
+				}
+			}
+		}
+		return null;
 	}
 
 	/**
