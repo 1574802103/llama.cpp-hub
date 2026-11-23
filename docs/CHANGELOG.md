@@ -529,3 +529,13 @@ llama-server，它回 **304 Not Modified**，代理也就无法注入，浏览�
 - `/api/sys/gpu/info`、`/api/sys/gpu/status` 是注释掉的历史接口，返回 404 属预期；
 - `/api/sys/setting` 的 GET 会把 `https.keystorePassword` 明文返回给任何能访问端口的客户端，
   局域网内等于裸奔。要改需要同时改前端的表单回填逻辑，这次没动。
+
+---
+
+## 2026-11-23 · 发布 0.0.2
+
+- 版本号 → **0.0.2**（`BuildInfo` 默认值与 `/api/sys/version` 一致）
+- README 重写：环境要求、端口与回环约束、参数面板（198 项 / b12651）、
+  用量与速度统计口径、聊天台等待页与可拖动胶囊、维护改动 19 条、冒烟测试结论
+- 发布包：`llama.cpp-hub-win64-cuda-b12651.zip`（内置 JRE + llama.cpp b12651 + cudart 13.5），
+  附 `llamacpp/README.txt`、`models/README.txt` 说明自备版本与模型目录规则
