@@ -1231,13 +1231,20 @@ public class ModelInfoController implements BaseController {
 				this.proxyPostRemote(ctx, request, nodeId, "api/models/slots/save");
 				return;
 			}
-			String modelId = json.has("modelId") ? json.get("modelId").getAsString() : null;
-			Integer slotId = null;
-			if (json.has("slotId")) {
-				slotId = json.get("slotId").getAsInt();
+			String modelId = json.has("modelId") && !json.get("modelId").isJsonNull()
+					? json.get("modelId").getAsString() : null;
+			if (modelId == null || modelId.trim().isEmpty()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error(I18N_PARAM_MODELID_REQUIRED));
+				return;
 			}
+			// slotId 缺了以前会 NPE（Integer 拆箱），这里直接按参数错误返回
+			if (!json.has("slotId") || json.get("slotId").isJsonNull()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需参数: slotId"));
+				return;
+			}
+			int slotId = json.get("slotId").getAsInt();
 			String fileName = modelId + "_" + slotId + ".bin";
-			ApiResponse response = LlamaServerManager.getInstance().handleModelSlotsSave(modelId, slotId.intValue(),
+			ApiResponse response = LlamaServerManager.getInstance().handleModelSlotsSave(modelId, slotId,
 					fileName);
 			// 响应消息。
 			LlamaServer.sendJsonResponse(ctx, response);
@@ -1392,13 +1399,19 @@ public class ModelInfoController implements BaseController {
 				this.proxyPostRemote(ctx, request, nodeId, "api/models/slots/load");
 				return;
 			}
-			String modelId = json.has("modelId") ? json.get("modelId").getAsString() : null;
-			Integer slotId = null;
-			if (json.has("slotId")) {
-				slotId = json.get("slotId").getAsInt();
+			String modelId = json.has("modelId") && !json.get("modelId").isJsonNull()
+					? json.get("modelId").getAsString() : null;
+			if (modelId == null || modelId.trim().isEmpty()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error(I18N_PARAM_MODELID_REQUIRED));
+				return;
 			}
-			String fileName = modelId + "_" + slotId.intValue() + ".bin";
-			ApiResponse response = LlamaServerManager.getInstance().handleModelSlotsLoad(modelId, slotId.intValue(),
+			if (!json.has("slotId") || json.get("slotId").isJsonNull()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需参数: slotId"));
+				return;
+			}
+			int slotId = json.get("slotId").getAsInt();
+			String fileName = modelId + "_" + slotId + ".bin";
+			ApiResponse response = LlamaServerManager.getInstance().handleModelSlotsLoad(modelId, slotId,
 					fileName);
 			// 响应消息。
 			LlamaServer.sendJsonResponse(ctx, response);

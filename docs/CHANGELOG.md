@@ -497,3 +497,35 @@ llama-server，它回 **304 Not Modified**，代理也就无法注入，浏览�
 
 实测（无头浏览器）：拖到 (660,388) → 刷新后仍在 (660,388)，菜单出现在 10..381 完整体内；
 拖到右上角 (1380,40) → 自动钳到 (1195,28)，菜单翻到下方 (top=68) 并右对齐到视口内。
+
+---
+
+## 2026-11-23 · 全项目冒烟测试（发现并修复 2 处问题）
+
+跑法：测试实例 8099（web）+ 8109（聊天台），源码与生产共用 classpath。
+
+**覆盖**
+- 123 条 `/api` 路由 × GET/POST = 246 次请求：无 5xx、无连接失败；
+- 功能链路 22 项：模型加载 → props / slots / metrics → 非流式+流式聊天 → 速度统计写入 →
+  5 个报表接口 → slots 存/取 → 聊天台 4 个内部接口 → 停止；
+- 补充 16 项：设置读写、自动加载策略、节点/MCP/下载、聊天快照写入+墓碑删除、基准测试、
+  i18n 完整性、20 并发 × 3 接口 × 5 轮；
+- 前端：旧 UI 9 个页面 + 新 UI（index-new.html）8 个页面，控制台 0 报错、0 失败请求；
+- 静态资源 27 个 + 12 个模块 js 全部 200；
+- 稳定性：1500 次请求内存 165.3 → 165.6 MB；`/api/sys/restart` 后 2 秒恢复，模型列表完整、可再次加载；
+  用量记录删除（2 条）后文件与统计同步清空。
+
+**修复 1：slots 存/取缺参数直接 NPE**
+`/api/models/slots/save`、`/api/models/slots/load` 在 body 里没有 `slotId` 时对 `Integer` 拆箱 → NPE，
+日志里是 `NullPointerException: Cannot invoke "java.lang.Integer.intValue()"`。
+现在缺 `modelId` / `slotId` 都按参数错误返回。
+
+**修复 2：9 个 i18n key 缺失**
+`modal.download_create.{auto_folder,auto_folder_desc,folder_name,folder_name_desc,node,node_desc}`、
+`page.console.model_list`、`page.model_path.empty`、`page.settings.llamacpp.version_list`
+在 zh-CN / en-US 都没有，只有 HTML 里的中文兜底 → 切到英文时这几处不翻译。已补齐并校验 zh/en key 完全一致。
+
+**未改动但值得注意**
+- `/api/sys/gpu/info`、`/api/sys/gpu/status` 是注释掉的历史接口，返回 404 属预期；
+- `/api/sys/setting` 的 GET 会把 `https.keystorePassword` 明文返回给任何能访问端口的客户端，
+  局域网内等于裸奔。要改需要同时改前端的表单回填逻辑，这次没动。
