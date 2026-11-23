@@ -1971,6 +1971,19 @@ public class LlamaServerManager {
 	 * @param modelId 模型ID
 	 * @return 端口号，如果模型未加载则返回null
 	 */
+	/**
+	 * 模型是否正在加载（不管是谁发起的：模型列表、自动加载、聊天台的按需加载）。
+	 * 聊天台用它决定是给「正在启动」页还是「未运行」页。
+	 */
+	public boolean isModelLoading(String modelId) {
+		if (modelId == null) {
+			return false;
+		}
+		synchronized (this.processLock) {
+			return this.loadingProcesses.containsKey(modelId);
+		}
+	}
+
 	public Integer getModelPort(String modelId) {
 		synchronized (this.processLock) {
 			return this.modelPorts.get(modelId);

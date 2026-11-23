@@ -526,6 +526,10 @@ public final class ChatProxyServer {
 	}
 
 	public boolean isLoading(String modelId) {
+		// 模型列表 / 自动加载发起的加载不在本类的 loading 里，要问 manager 才算得准
+		if (LlamaServerManager.getInstance().isModelLoading(modelId)) {
+			return true;
+		}
 		Long started = loading.get(modelId);
 		if (started == null) {
 			return false;
@@ -636,6 +640,7 @@ public final class ChatProxyServer {
 					copyHeaders(response, full, true);
 					full.headers().set(HttpHeaderNames.CONTENT_LENGTH, out.length);
 					full.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/html; charset=utf-8");
+					full.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-store");
 					full.headers().add(HttpHeaderNames.SET_COOKIE,
 							"hub_model=" + modelId + "; Path=/; Max-Age=31536000; SameSite=Lax");
 					ctx.writeAndFlush(full);

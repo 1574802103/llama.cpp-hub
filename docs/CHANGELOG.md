@@ -425,3 +425,21 @@ hub 自己的等待页（`/` 返回「正在启动」+ 轮询 `/__hubchat/status
 上游 b12648 只多了 1 个选项：`--ui-mcp-proxy-allow-private-urls`（允许聊天台的 MCP 代理访问本机/内网地址，
 默认只放行公网）。已补进「高级功能」组，说明写明安全代价。表 **197 → 198 项**，bench 表与 b12375 完全一致（38 项），
 `validate_tables.py` 对着 b12648 的 `--help` 复核：0 死项、i18n 齐全。
+
+---
+
+## 2026-11-23 · 回退聊天页遮罩，改从源头修等待态
+
+上一版给聊天页加的全屏遮罩（`watchModelState`）是错的：模型列表发起的加载不在
+`ChatProxyServer.loading` 里，状态接口把它报成「未运行」，遮罩就把整页挡住、也不再自动进 WebUI。
+**已整段删除**，`hubchat.js` 回到 11-14 之前的形态（只做历史同步 + 左下角切换器）。
+
+真正的修法：
+- `LlamaServerManager.isModelLoading(modelId)`：把「模型列表 / 自动加载」正在进行的加载也暴露出来；
+- `ChatProxyServer.isLoading()` 先问它，再回落到自己的 `loading`：
+  未加载但正在加载 → 「正在启动」页；既没加载也没在加载 → 「未运行」页（带启动按钮）。
+- 注入的 HTML 加 `Cache-Control: no-store`，避免旧壳被浏览器缓存后顶掉等待页。
+
+实测（真实浏览器点击行内聊天按钮，模型未加载）：t+1..4s 「正在启动」→ t+6s 进入 WebUI；
+模型已加载时点聊天直接进。自动卸载仍然有效：20s 超时 + 每 2s 轮询 `/props`、`/v1/models`，
+24.3s 被卸载。
