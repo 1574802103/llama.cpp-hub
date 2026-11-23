@@ -2669,5 +2669,7 @@
   "param.benchmark.progress.name": "显示进度",
   "param.benchmark.tensor_split.desc": "--tensor-split：按比例把模型分到多张卡上，例如 1,1 表示两张卡各一半；只填一个值时在所有 GPU 间平均分配。",
   "param.benchmark.repack.name": "权重重排",
-  "param.benchmark.repack.desc": "--repack：是否把权重重新排布成更适合 GPU 的布局（1 开、0 关，默认开）。个别后端/量化组合下 repack 会变慢或出错，这时可以关掉。"
+  "param.benchmark.repack.desc": "--repack：是否把权重重新排布成更适合 GPU 的布局（1 开、0 关，默认开）。个别后端/量化组合下 repack 会变慢或出错，这时可以关掉。",
+  "param.server.ui_mcp_proxy_allow_private_urls.name": "允许 MCP 代理访问内网",
+  "param.server.ui_mcp_proxy_allow_private_urls.desc": "--ui-mcp-proxy-allow-private-urls：允许聊天台的 MCP 代理转发到本机/内网地址（例如跑在 localhost 或局域网里的 MCP 服务器）。默认只放行公网地址；打开后，任何能访问这个代理的人也能访问你的内网，只在可信环境启用。"
 }

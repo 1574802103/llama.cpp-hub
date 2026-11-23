@@ -2870,5 +2870,18 @@
     "group": "page.params.group.draft_model",
     "groupOrder": 70,
     "groupCollapsed": true
+  },
+  {
+    "name": "param.server.ui_mcp_proxy_allow_private_urls.name",
+    "fullName": "--ui-mcp-proxy-allow-private-urls",
+    "abbreviation": "--ui-mcp-proxy-allow-private-urls",
+    "type": "LOGIC",
+    "defaultValue": "0",
+    "description": "param.server.ui_mcp_proxy_allow_private_urls.desc",
+    "sort": 120,
+    "defaultEnabled": false,
+    "group": "page.params.group.advanced",
+    "groupOrder": 80,
+    "groupCollapsed": true
   }
 ]

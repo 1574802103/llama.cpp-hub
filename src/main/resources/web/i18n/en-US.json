@@ -2669,5 +2669,7 @@
   "param.benchmark.progress.name": "Show progress",
   "param.benchmark.tensor_split.desc": "--tensor-split: split the model across GPUs by ratio (1,1 = even); a single value is broadcast.",
   "param.benchmark.repack.name": "Weight repacking",
-  "param.benchmark.repack.desc": "--repack: enable weight repacking into a GPU-friendly layout (1 = on, 0 = off, default on). Turn it off if a backend/quant combination misbehaves."
+  "param.benchmark.repack.desc": "--repack: enable weight repacking into a GPU-friendly layout (1 = on, 0 = off, default on). Turn it off if a backend/quant combination misbehaves.",
+  "param.server.ui_mcp_proxy_allow_private_urls.name": "MCP proxy: allow private URLs",
+  "param.server.ui_mcp_proxy_allow_private_urls.desc": "--ui-mcp-proxy-allow-private-urls: let the WebUI MCP proxy reach localhost/LAN addresses (e.g. MCP servers running locally). Anyone who can reach the proxy can then reach your local network; enable only in trusted environments."
 }
