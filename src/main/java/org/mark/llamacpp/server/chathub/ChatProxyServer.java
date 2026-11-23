@@ -1,6 +1,7 @@
 package org.mark.llamacpp.server.chathub;
 
 import java.io.ByteArrayInputStream;
+import org.mark.llamacpp.server.service.ModelRequestTracker;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -219,8 +220,13 @@ public final class ChatProxyServer {
 				return;
 			}
 
-			LlamaServerManager.getInstance().updateModelLastUsedTime(modelId);
-			proxy(ctx, request, port, modelId);
+			// 只有真正算 token 的请求才算「用过模型」。WebUI 开着的时候会不停轮询 /props、/models、/slots，
+			// 以前每一条代理请求都刷新 lastUsed，导致「无工作 5 分钟自动卸载」永远等不到空闲。
+			boolean generation = isGenerationPath(request.method().name(), path);
+			if (generation) {
+				LlamaServerManager.getInstance().updateModelLastUsedTime(modelId);
+			}
+			proxy(ctx, request, port, modelId, generation);
 		}
 	}
 
@@ -557,7 +563,8 @@ public final class ChatProxyServer {
 
 	/* ------------------------------------------------------------------ 反向代理 */
 
-	private void proxy(ChannelHandlerContext ctx, FullHttpRequest request, int port, String modelId) {
+	private void proxy(ChannelHandlerContext ctx, FullHttpRequest request, int port, String modelId,
+			boolean generation) {
 		String method = request.method().name();
 		String uri = request.uri();
 		byte[] body = readBody(request);
@@ -582,6 +589,10 @@ public final class ChatProxyServer {
 		}
 
 		Thread.ofVirtual().name("chat-proxy").start(() -> {
+			// 生成类请求登记成「忙」，自动卸载调度器看到 busy 就不会把正在吐字的模型停掉
+			String trackedRequest = generation
+					? ModelRequestTracker.getInstance().createRequest(modelId, uri)
+					: null;
 			try {
 				HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + uri));
 				builder.method(method, body.length > 0
@@ -682,6 +693,10 @@ public final class ChatProxyServer {
 				if (ctx.channel().isActive()) {
 					sendHtml(ctx, HttpResponseStatus.BAD_GATEWAY, errorPage(modelId, e.getMessage()));
 				}
+			} finally {
+				if (trackedRequest != null) {
+					ModelRequestTracker.getInstance().removeRequest(trackedRequest);
+				}
 			}
 		});
 	}
@@ -689,6 +704,21 @@ public final class ChatProxyServer {
 	private boolean isDocumentPath(String uri) {
 		String path = new QueryStringDecoder(uri).path();
 		return path.equals("/") || path.endsWith(".html");
+	}
+
+	/**
+	 * 是否「真正在算 token」的请求。只有这类请求才刷新 lastUsed / 标记 busy。
+	 * WebUI 页面本身会一直轮询 /props、/models、/slots、静态资源，这些都不算使用。
+	 */
+	private boolean isGenerationPath(String method, String path) {
+		if (!"POST".equalsIgnoreCase(method)) {
+			return false;
+		}
+		return path.startsWith("/v1/chat/completions") || path.startsWith("/v1/completions")
+				|| path.startsWith("/v1/responses") || path.startsWith("/v1/embeddings")
+				|| path.startsWith("/v1/rerank") || path.startsWith("/v1/infill")
+				|| path.equals("/completion") || path.equals("/embeddings")
+				|| path.equals("/rerank") || path.equals("/infill");
 	}
 
 	private boolean isStreamingPath(String uri) {

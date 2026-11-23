@@ -390,3 +390,30 @@ hub 的 `/v1`、聊天台、模型列表本来就都由 hub 自己代理（内�
 **验证**
 - 双会话 A/B：删 B 并带墓碑后，GET 只剩 A、B 的消息也没了；再把 B 推回来，墓碑照样挡住。
 - 拿他的真实快照跑：GET 一次后 39 → 10 个会话、138 → 31 条消息，磁盘文件同步重写。
+
+---
+
+## 2026-11-23 · 聊天台：等待态兜底 + 自动卸载恢复正常
+
+**问题 1：模型还没加载完就进了 WebUI**
+hub 自己的等待页（`/` 返回「正在启动」+ 轮询 `/__hubchat/status`）是好的，
+但 WebUI 是静态 SPA，浏览器缓存 / bfcache / 标签页恢复时会把旧的壳直接渲染出来，跳过等待页。
+
+修复：`hubchat.js` 增加 `watchModelState()` —— 每 2 秒问一次 `/__hubchat/status`，
+没就绪就在整页盖一层遮罩（「正在启动…」或「模型未运行 + 启动模型按钮」），就绪后自动 reload 进入聊天页。
+这样不管页面是从服务器来的还是缓存里的壳，都不会出现「模型没跑却能点输入框」。
+
+**问题 2：WebUI 开着时 5 分钟自动卸载不生效**
+`ChatProxyServer` 以前对**每一条**代理请求都调 `updateModelLastUsedTime()`，
+而 WebUI 打开后一直轮询 `/props`、`/v1/models`、静态资源，lastUsed 永远在刷新。
+
+修复：
+- 只有真正的生成类请求（POST `/v1/chat/completions`、`/v1/completions`、`/completion`、
+  `/v1/embeddings`、`/rerank`、`/infill`、`/v1/responses`）才刷新 lastUsed；
+- 同一批请求同时登记到 `ModelRequestTracker`（`createRequest`/`removeRequest`），
+  这样自动卸载看到 `busy=true` 会跳过，长回答不会被中途停掉。
+
+**验证**
+- 把超时设成 20s，一边每 2 秒轮询 `/props` `/v1/models` 模拟 WebUI 开着：模型在 16.2s 被卸载 ✔
+- 同样的 20s 超时下跑一个长流（4000 token）：`busy=true` 持续 24s+，没有被卸载 ✔
+- 打开聊天页后停掉模型：2 秒内出现「模型未运行」遮罩，点按钮调 `/__hubchat/start` 能重新拉起 ✔
