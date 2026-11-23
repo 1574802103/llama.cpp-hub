@@ -251,6 +251,8 @@
     var style = document.createElement('style');
     style.textContent = [
       '#hubchat-switch{position:fixed;left:14px;bottom:14px;z-index:2147483000;font:12px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif;',
+      '#hubchat-switch{cursor:grab;touch-action:none;user-select:none}',
+      '#hubchat-switch.dragging{cursor:grabbing}',
       'background:#161a22;color:#e5e7eb;border:1px solid #2b3240;border-radius:10px;padding:7px 10px;cursor:pointer;',
       'box-shadow:0 6px 20px rgba(0,0,0,.35);max-width:240px;display:flex;align-items:center;gap:8px}',
       '#hubchat-switch:hover{border-color:#3f4a5c}',
@@ -290,6 +292,111 @@
     button.id = 'hubchat-switch';
     button.innerHTML = '<i class="dot"></i><span></span>';
     document.body.appendChild(button);
+
+    // ---------------------------------------------------------------- 拖动
+    var POS_KEY = 'hubchat.pill.position';
+    var dragPointer = null;
+    var dragMoved = false;
+    var dragStart = { x: 0, y: 0 };
+    var dragOrigin = { x: 0, y: 0 };
+    var suppressClick = false;
+
+    function clampToViewport(x, y) {
+      var rect = button.getBoundingClientRect();
+      var maxX = Math.max(4, window.innerWidth - rect.width - 6);
+      var maxY = Math.max(4, window.innerHeight - rect.height - 6);
+      return {
+        x: Math.min(Math.max(6, x), maxX),
+        y: Math.min(Math.max(6, y), maxY)
+      };
+    }
+
+    function moveTo(x, y) {
+      var pos = clampToViewport(x, y);
+      button.style.left = pos.x + 'px';
+      button.style.top = pos.y + 'px';
+      button.style.bottom = 'auto';
+      return pos;
+    }
+
+    function savePosition() {
+      try {
+        var rect = button.getBoundingClientRect();
+        localStorage.setItem(POS_KEY, JSON.stringify({
+          x: rect.left, y: rect.top,
+          w: window.innerWidth, h: window.innerHeight
+        }));
+      } catch (e) { }
+    }
+
+    function restorePosition() {
+      try {
+        var saved = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
+        if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
+          moveTo(saved.x, saved.y);
+        }
+      } catch (e) { }
+    }
+
+    button.addEventListener('pointerdown', function (event) {
+      if (event.button !== undefined && event.button !== 0) {
+        return;
+      }
+      var rect = button.getBoundingClientRect();
+      dragPointer = event.pointerId;
+      dragMoved = false;
+      suppressClick = false;
+      dragStart.x = event.clientX;
+      dragStart.y = event.clientY;
+      dragOrigin.x = rect.left;
+      dragOrigin.y = rect.top;
+      button.classList.add('dragging');
+      if (button.setPointerCapture) {
+        try { button.setPointerCapture(event.pointerId); } catch (e) { }
+      }
+    });
+
+    button.addEventListener('pointermove', function (event) {
+      if (dragPointer === null || event.pointerId !== dragPointer) {
+        return;
+      }
+      var dx = event.clientX - dragStart.x;
+      var dy = event.clientY - dragStart.y;
+      if (!dragMoved && Math.abs(dx) + Math.abs(dy) < 4) {
+        return;
+      }
+      dragMoved = true;
+      event.preventDefault();
+      moveTo(dragOrigin.x + dx, dragOrigin.y + dy);
+    });
+
+    function endDrag(event) {
+      if (dragPointer === null) {
+        return;
+      }
+      if (event && event.pointerId !== undefined && event.pointerId !== dragPointer) {
+        return;
+      }
+      dragPointer = null;
+      button.classList.remove('dragging');
+      if (dragMoved) {
+        savePosition();
+        suppressClick = true;   // 拖完不要顺手把菜单点开
+      }
+    }
+
+    button.addEventListener('pointerup', endDrag);
+    button.addEventListener('pointercancel', endDrag);
+    window.addEventListener('resize', function () {
+      var rect = button.getBoundingClientRect();
+      moveTo(rect.left, rect.top);
+    });
+
+    if (document.readyState === 'complete') {
+      restorePosition();
+    } else {
+      window.addEventListener('load', restorePosition);
+    }
 
     var menu = null;
     var rowsBox = null;
@@ -404,6 +511,29 @@
       setTimeout(loadData, 6000);
     }
 
+    // 菜单贴着胶囊弹：按两侧剩余空间挑方向，并限制高度，保证整块都在视口里
+    function placeMenu() {
+      if (!menu) {
+        return;
+      }
+      var rect = button.getBoundingClientRect();
+      var width = Math.min(480, Math.max(340, menu.offsetWidth || 360));
+      var left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8));
+      menu.style.left = left + 'px';
+
+      var above = Math.max(0, rect.top - 18);
+      var below = Math.max(0, window.innerHeight - rect.bottom - 18);
+      var goesUp = above >= below;
+      var room = Math.max(120, goesUp ? above : below);
+      menu.style.maxHeight = Math.min(window.innerHeight * 0.66, room) + 'px';
+      menu.style.bottom = 'auto';
+      if (goesUp) {
+        menu.style.top = Math.max(8, rect.top - menu.offsetHeight - 8) + 'px';
+      } else {
+        menu.style.top = Math.min(rect.bottom + 8, window.innerHeight - 140) + 'px';
+      }
+    }
+
     function openMenu() {
       closeMenu();
       menu = document.createElement('div');
@@ -437,6 +567,7 @@
       }
 
       document.body.appendChild(menu);
+      placeMenu();
       setTimeout(function () {
         document.addEventListener('click', function onDoc(event) {
           if (menu && !menu.contains(event.target) && event.target !== button) {
@@ -448,6 +579,7 @@
     }
 
     button.addEventListener('click', function () {
+      if (suppressClick) { suppressClick = false; return; }
       if (menu) { closeMenu(); return; }
       openMenu();
     });
