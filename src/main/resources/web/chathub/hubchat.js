@@ -11,7 +11,16 @@
 (function () {
   'use strict';
 
-  var MODEL = window.__HUB_MODEL || '';
+  var MODEL = (function () {
+    // 地址栏的 ?m= 才是权威：注入戳可能来自缓存的旧 HTML
+    try {
+      var fromUrl = new URLSearchParams(location.search).get('m');
+      if (fromUrl) {
+        return fromUrl;
+      }
+    } catch (e) { }
+    return window.__HUB_MODEL || '';
+  })();
   var API = '/__hubchat';
   var DB_NAME = 'LlamaUi';
   var CONFIG_KEYS = [

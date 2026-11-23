@@ -603,7 +603,17 @@ public final class ChatProxyServer {
 						? HttpRequest.BodyPublishers.ofByteArray(body)
 						: HttpRequest.BodyPublishers.noBody());
 				builder.header("Accept-Encoding", "gzip");
+				// 主页要注入 __HUB_MODEL，必须每次都拿到完整 HTML。
+				// 转发 If-None-Match 时 llama-server 会回 304，浏览器就复用缓存里那份
+				// 带着「另一个模型」戳的旧页面 —— 左下角模型名对不上就是这么来的。
+				boolean isDocument = isDocumentPath(uri);
 				for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+					String headerName = entry.getKey();
+					if (isDocument && ("if-none-match".equalsIgnoreCase(headerName)
+							|| "if-modified-since".equalsIgnoreCase(headerName)
+							|| "if-range".equalsIgnoreCase(headerName))) {
+						continue;
+					}
 					if (entry.getValue().size() == 1) {
 						builder.header(entry.getKey(), entry.getValue().get(0));
 					} else {
@@ -612,7 +622,6 @@ public final class ChatProxyServer {
 						}
 					}
 				}
-				boolean isDocument = isDocumentPath(uri);
 				if (!isStreamingPath(uri)) {
 					builder.timeout(Duration.ofSeconds(120));
 				}

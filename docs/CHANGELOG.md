@@ -443,3 +443,22 @@ hub 自己的等待页（`/` 返回「正在启动」+ 轮询 `/__hubchat/status
 实测（真实浏览器点击行内聊天按钮，模型未加载）：t+1..4s 「正在启动」→ t+6s 进入 WebUI；
 模型已加载时点聊天直接进。自动卸载仍然有效：20s 超时 + 每 2s 轮询 `/props`、`/v1/models`，
 24.3s 被卸载。
+
+---
+
+## 2026-11-23 · 修左下角模型名对不上
+
+现象：地址栏是 `?m=Gemma4-12B…`、对话气泡也标着 Gemma4，左下角切换器却显示 `Qwen3.8-27B-IQ4_XS`，
+菜单里高亮的也是 Qwen。
+
+原因：主页要注入 `window.__HUB_MODEL=<当前模型>`，但代理把浏览器的 `If-None-Match` 原样转给了
+llama-server，它回 **304 Not Modified**，代理也就无法注入，浏览器于是复用缓存里那份
+**带着另一个模型戳**的旧 HTML。WebUI 的 index.html 与模型无关、ETag 恒定，所以只要换过模型就必现。
+
+修复：
+1. 文档请求不再转发 `If-None-Match` / `If-Modified-Since` / `If-Range`，保证每次都拿到完整 HTML 再注入；
+2. 注入的 HTML 加 `Cache-Control: no-store`；
+3. `hubchat.js` 里模型身份以地址栏 `?m=` 为准，注入戳只作兜底 —— 即使拿到旧壳也能自愈。
+
+验证：带旧 ETag 复访返回 200（不再 304）、戳为请求的模型；无头浏览器实测
+`window.__HUB_MODEL` 与左下角文本都等于 `Gemma4-12B-IT-QAT-Q4_K_XL`。
